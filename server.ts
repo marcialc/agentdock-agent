@@ -167,7 +167,7 @@ async function execTool(name: string, args: Record<string, unknown>): Promise<un
   }
 }
 
-async function callModel(messages: ChatMessage[], model: string): Promise<ChatMessage> {
+async function callModel(messages: ChatMessage[], model: string, round: number): Promise<ChatMessage> {
   if (!BASE_URL) {
     throw new Error("OPENAI_API_BASE_URL is not set in the sandbox env.");
   }
@@ -175,34 +175,117 @@ async function callModel(messages: ChatMessage[], model: string): Promise<ChatMe
     throw new Error("OPENAI_API_KEY is not set in the sandbox env.");
   }
   const url = `${BASE_URL}/chat/completions`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      tools: TOOL_DEFS,
-      tool_choice: "auto",
-    }),
+  const requestBody = JSON.stringify({
+    model,
+    messages,
+    tools: TOOL_DEFS,
+    tool_choice: "auto",
   });
+  const reqId = `r${round}-${Date.now().toString(36)}`;
+  log("callModel.request", {
+    reqId,
+    url,
+    model,
+    msgCount: messages.length,
+    msgRoles: messages.map((m) => m.role),
+    contentTypes: messages.map((m) => describeContent(m.content)),
+    toolCallsCount: messages.reduce((n, m) => n + (m.tool_calls?.length ?? 0), 0),
+    bodyBytes: requestBody.length,
+  });
+  const t0 = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${API_KEY}`,
+      },
+      body: requestBody,
+    });
+  } catch (err) {
+    log("callModel.fetchError", { reqId, message: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
   const text = await res.text();
+  const elapsed = Date.now() - t0;
   if (!res.ok) {
-    throw new Error(`AI Gateway ${res.status}: ${text.slice(0, 800)}`);
+    log("callModel.error", {
+      reqId,
+      status: res.status,
+      elapsedMs: elapsed,
+      bodyPreview: text.slice(0, 4000),
+      requestPreview: requestBody.slice(0, 2000),
+    });
+    throw new Error(`AI Gateway ${res.status}: ${text.slice(0, 4000)}`);
   }
   let json: { choices?: Array<{ message: ChatMessage }> };
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error(`AI Gateway returned non-JSON: ${text.slice(0, 800)}`);
+    log("callModel.nonJson", { reqId, status: res.status, elapsedMs: elapsed, bodyPreview: text.slice(0, 2000) });
+    throw new Error(`AI Gateway returned non-JSON: ${text.slice(0, 2000)}`);
   }
   const message = json.choices?.[0]?.message;
   if (!message) {
-    throw new Error(`AI Gateway response missing choices[0].message: ${text.slice(0, 800)}`);
+    log("callModel.missingMessage", { reqId, status: res.status, elapsedMs: elapsed, bodyPreview: text.slice(0, 2000) });
+    throw new Error(`AI Gateway response missing choices[0].message: ${text.slice(0, 2000)}`);
   }
-  return message;
+  const normalized = normalizeAssistantMessage(message);
+  log("callModel.response", {
+    reqId,
+    elapsedMs: elapsed,
+    status: res.status,
+    contentType: describeContent(normalized.content),
+    contentLen: typeof normalized.content === "string" ? normalized.content.length : 0,
+    toolCalls: (normalized.tool_calls ?? []).map((c) => ({ id: c.id, name: c.function?.name })),
+  });
+  return normalized;
+}
+
+function describeContent(c: unknown): string {
+  if (c === null) return "null";
+  if (typeof c === "string") return `string(${c.length})`;
+  if (Array.isArray(c)) return `array(${c.length})`;
+  return typeof c;
+}
+
+function log(event: string, data: Record<string, unknown>): void {
+  console.log(`[agentdock-agent] ${event} ${JSON.stringify(data)}`);
+}
+
+// Workers AI's OpenAI-compat may return `content` as an array of content
+// blocks ({type:"text",text:"..."}); the same endpoint's input schema rejects
+// array content on subsequent rounds. Flatten to a string. When `tool_calls`
+// are present, OpenAI's schema requires `content: null`.
+function normalizeAssistantMessage(raw: unknown): ChatMessage {
+  const m = raw as ChatMessage & { content?: unknown };
+  let content: string | null;
+  if (Array.isArray(m.content)) {
+    content = (m.content as Array<unknown>)
+      .map((c) => {
+        if (typeof c === "string") return c;
+        if (c && typeof c === "object" && "text" in (c as Record<string, unknown>)) {
+          return String((c as { text: unknown }).text ?? "");
+        }
+        return "";
+      })
+      .join("");
+  } else if (typeof m.content === "string") {
+    content = m.content;
+  } else {
+    content = null;
+  }
+  if (m.tool_calls && m.tool_calls.length > 0) {
+    content = null;
+  }
+  return {
+    role: m.role,
+    content,
+    tool_calls: m.tool_calls,
+    tool_call_id: m.tool_call_id,
+    name: m.name,
+  };
 }
 
 interface RunResult {
@@ -212,25 +295,49 @@ interface RunResult {
 }
 
 async function runAgent(userMessages: ChatMessage[], model: string): Promise<RunResult> {
-  const messages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...userMessages];
+  const sanitized = userMessages.map(sanitizeIncomingMessage);
+  const messages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...sanitized];
   const toolEvents: RunResult["toolEvents"] = [];
+  log("runAgent.start", {
+    model,
+    incomingCount: userMessages.length,
+    sanitizedRoles: sanitized.map((m) => m.role),
+    sanitizedContentTypes: sanitized.map((m) => describeContent(m.content)),
+  });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const reply = await callModel(messages, model);
+    const reply = await callModel(messages, model, round);
     messages.push(reply);
 
     if (!reply.tool_calls || reply.tool_calls.length === 0) {
-      return { messages, finalText: reply.content ?? "", toolEvents };
+      const finalText = typeof reply.content === "string" ? reply.content : "";
+      log("runAgent.done", { round, finalLen: finalText.length, toolEventCount: toolEvents.length });
+      return { messages, finalText, toolEvents };
     }
 
     for (const call of reply.tool_calls) {
       let parsed: Record<string, unknown> = {};
       try {
         parsed = JSON.parse(call.function.arguments || "{}");
-      } catch {
+      } catch (err) {
+        log("runAgent.toolArgsParseError", {
+          round,
+          tool: call.function?.name,
+          rawPreview: String(call.function?.arguments ?? "").slice(0, 400),
+          message: err instanceof Error ? err.message : String(err),
+        });
         parsed = {};
       }
+      log("runAgent.tool.start", { round, id: call.id, name: call.function.name, args: previewArgs(parsed) });
+      const t0 = Date.now();
       const result = await execTool(call.function.name, parsed);
+      log("runAgent.tool.done", {
+        round,
+        id: call.id,
+        name: call.function.name,
+        elapsedMs: Date.now() - t0,
+        resultPreview: previewResult(result),
+      });
       toolEvents.push({ name: call.function.name, args: parsed, result });
       messages.push({
         role: "tool",
@@ -241,11 +348,63 @@ async function runAgent(userMessages: ChatMessage[], model: string): Promise<Run
     }
   }
 
+  log("runAgent.maxRounds", { rounds: MAX_TOOL_ROUNDS, toolEventCount: toolEvents.length });
   return {
     messages,
     finalText: "(stopped: max tool rounds reached)",
     toolEvents,
   };
+}
+
+// Defensive: clients may have stored model replies from prior turns where
+// `content` ended up as an array (Workers AI compat quirk). Flatten before we
+// re-send so the gateway's strict input schema accepts the request.
+function sanitizeIncomingMessage(msg: ChatMessage): ChatMessage {
+  const m = msg as ChatMessage & { content?: unknown };
+  let content: string | null;
+  if (Array.isArray(m.content)) {
+    content = (m.content as Array<unknown>)
+      .map((c) => {
+        if (typeof c === "string") return c;
+        if (c && typeof c === "object" && "text" in (c as Record<string, unknown>)) {
+          return String((c as { text: unknown }).text ?? "");
+        }
+        return "";
+      })
+      .join("");
+  } else if (typeof m.content === "string") {
+    content = m.content;
+  } else {
+    content = null;
+  }
+  if (m.tool_calls && m.tool_calls.length > 0) {
+    content = null;
+  }
+  return {
+    role: m.role,
+    content,
+    tool_calls: m.tool_calls,
+    tool_call_id: m.tool_call_id,
+    name: m.name,
+  };
+}
+
+function previewArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v === "string" && v.length > 200) out[k] = `${v.slice(0, 200)}…(+${v.length - 200})`;
+    else out[k] = v;
+  }
+  return out;
+}
+
+function previewResult(result: unknown): string {
+  try {
+    const s = JSON.stringify(result);
+    return s.length > 400 ? `${s.slice(0, 400)}…(+${s.length - 400})` : s;
+  } catch {
+    return "(unserializable)";
+  }
 }
 
 const INDEX_HTML = await Bun.file(`${import.meta.dir}/public/index.html`).text();
@@ -271,12 +430,24 @@ Bun.serve({
     }
 
     if (url.pathname === "/api/chat" && req.method === "POST") {
+      const reqStart = Date.now();
       try {
         const body = (await req.json()) as { messages?: ChatMessage[]; model?: string };
         if (!Array.isArray(body.messages)) {
           return jsonError(400, "messages must be an array");
         }
+        log("chat.request", {
+          msgCount: body.messages.length,
+          model: body.model || DEFAULT_MODEL,
+          lastUser: previewLastUser(body.messages),
+        });
         const result = await runAgent(body.messages, body.model || DEFAULT_MODEL);
+        log("chat.response", {
+          elapsedMs: Date.now() - reqStart,
+          finalLen: result.finalText.length,
+          toolEventCount: result.toolEvents.length,
+          finalMsgCount: result.messages.length,
+        });
         return Response.json(
           {
             reply: result.finalText,
@@ -286,7 +457,10 @@ Bun.serve({
           { headers: corsHeaders() },
         );
       } catch (err) {
-        return jsonError(500, err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
+        log("chat.error", { elapsedMs: Date.now() - reqStart, message, stack });
+        return jsonError(500, message);
       }
     }
 
@@ -307,6 +481,18 @@ function jsonError(status: number, message: string): Response {
     status,
     headers: { "content-type": "application/json", ...corsHeaders() },
   });
+}
+
+function previewLastUser(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user") {
+      const c = m.content;
+      const s = typeof c === "string" ? c : Array.isArray(c) ? JSON.stringify(c) : "";
+      return s.length > 160 ? `${s.slice(0, 160)}…` : s;
+    }
+  }
+  return "";
 }
 
 console.log(`[agentdock-agent] listening on http://${HOSTNAME}:${PORT}, default model=${DEFAULT_MODEL}`);
