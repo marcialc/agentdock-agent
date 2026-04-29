@@ -9,14 +9,29 @@ const DEFAULT_MODEL = process.env.MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-
 const MAX_TOOL_ROUNDS = 12;
 const MAX_TOOL_OUTPUT = 8000;
 
+const AGENT_OWN_PORT = process.env.AGENTDOCK_AGENT_PORT || process.env.PORT || "8080";
+const PREVIEW_BASE = process.env.AGENTDOCK_PREVIEW_BASE || "";
+
 const SYSTEM_PROMPT = `You are AgentDock-Agent, a minimal autonomous assistant running inside a Cloudflare Sandbox container.
+
 You have access to four tools that operate on the sandbox filesystem:
 - shell: run any shell command and read stdout/stderr/exit code
 - read_file: read a file's contents
 - write_file: create or overwrite a file
 - list_files: list directory entries
-Use them as needed. The sandbox is ephemeral and isolated — anything you do here doesn't affect the user's machine.
-Be concise, run tools in parallel when independent, and stop when the task is done.`;
+
+The sandbox is ephemeral and isolated — anything you do here doesn't affect the user's machine. Be concise, run tools in parallel when independent, and stop when the task is done.
+
+LAUNCHING WEB SERVERS:
+- Port ${AGENT_OWN_PORT} is already bound by this agent UI. NEVER start a child web server on ${AGENT_OWN_PORT} — pick 8081, 8082, etc.
+- When you start a child server, set its port explicitly (e.g. \`PORT=8081 bun run server.ts\`, \`vite --port 5174\`, \`next dev -p 3001\`). Verify it's listening before claiming success: \`curl -sf http://localhost:<port>/ >/dev/null && echo OK\`.
+- Run servers in the background so you don't block: append \` >/tmp/<name>.log 2>&1 &\`. Tail the log if you need to debug.${
+  PREVIEW_BASE
+    ? `
+- Tell the user the preview URL: \`${PREVIEW_BASE}<port>/\`. AgentDock's path proxy reaches any port that's listening inside the container; the user opens that URL in their own browser to see the rendered UI.`
+    : ""
+}
+- You cannot see rendered output yourself (no browser/screenshot tool). To validate, \`curl\` the URL and reason about the HTML/JSON, or hand the preview URL back to the user.`;
 
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
