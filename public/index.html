@@ -828,9 +828,47 @@
   /* File viewer (replaces chat in main area when active) */
   .fileview {
     flex: 1;
-    overflow: auto;
     background: var(--bg);
     min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  .fileview-modes {
+    display: none;
+    align-items: center; gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--bg-1);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    flex-shrink: 0;
+  }
+  .fileview-modes[data-show="true"] { display: flex; }
+  .fileview-mode {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 3px 10px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .fileview-mode:hover { background: var(--bg-2); color: var(--text); }
+  .fileview-mode[data-active="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: var(--text);
+  }
+  .fileview-body {
+    flex: 1;
+    overflow: auto;
+    min-height: 0;
+  }
+  .fileview-body iframe {
+    width: 100%; height: 100%;
+    border: 0;
+    background: #fff;
+    display: block;
   }
   .fileview-banner {
     padding: 6px 14px;
@@ -969,6 +1007,10 @@
       <div class="scroll-inner" id="thread"></div>
     </div>
     <section class="fileview" id="fileview">
+      <div class="fileview-modes" id="fileview-modes">
+        <button class="fileview-mode" data-mode="preview" id="fileview-mode-preview">preview</button>
+        <button class="fileview-mode" data-mode="source"  id="fileview-mode-source">source</button>
+      </div>
       <div class="fileview-body" id="fileview-body"></div>
     </section>
 
@@ -1670,6 +1712,14 @@ function renderTreeNode(path, isDir) {
 }
 
 // ---------- file viewer ----------
+const fileViewState = { path: null, data: null, mode: 'source' };
+
+function isHtmlPath(path) {
+  if (!path) return false;
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  return ext === 'html' || ext === 'htm';
+}
+
 async function openFile(path) {
   const tab = $('#tab-file');
   const tabName = $('#tab-file-name');
@@ -1678,30 +1728,64 @@ async function openFile(path) {
   tabName.textContent = path.split('/').pop() || path;
   tab.title = path;
   setActiveTab('file');
+  fileViewState.path = path;
+  fileViewState.data = null;
+  fileViewState.mode = isHtmlPath(path) ? 'preview' : 'source';
+  $('#fileview-modes').dataset.show = isHtmlPath(path) ? 'true' : 'false';
+  syncModeButtons();
   body.innerHTML = '';
   body.append(el('div', { class: 'fileview-empty' }, 'loading…'));
   try {
     const res = await fetch('./api/fs/read?path=' + encodeURIComponent(path));
-    body.innerHTML = '';
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
+      body.innerHTML = '';
       body.append(el('div', { class: 'fileview-error' }, `${res.status} — ${j.error || 'failed to read'}`));
       return;
     }
     const data = await res.json();
-    if (data.binary) {
-      body.append(el('div', { class: 'fileview-empty' }, `Binary file (${fmtBytes(data.size||0)}) — preview unavailable`));
-      return;
-    }
-    if (data.truncated) {
-      body.append(el('div', { class: 'fileview-banner' },
-        `showing first ${fmtBytes(262144)} of ${fmtBytes(data.size||0)}`));
-    }
-    body.append(renderCodeBlock(data.content || '', guessLang(path)));
+    fileViewState.data = data;
+    renderFileView();
   } catch (err) {
     body.innerHTML = '';
     body.append(el('div', { class: 'fileview-error' }, err && err.message ? err.message : String(err)));
   }
+}
+
+function renderFileView() {
+  const body = $('#fileview-body');
+  const { path, data, mode } = fileViewState;
+  body.innerHTML = '';
+  if (!data) return;
+  if (data.binary) {
+    body.append(el('div', { class: 'fileview-empty' }, `Binary file (${fmtBytes(data.size||0)}) — preview unavailable`));
+    return;
+  }
+  if (mode === 'preview' && isHtmlPath(path)) {
+    const iframe = el('iframe', {
+      sandbox: 'allow-scripts allow-forms',
+      srcdoc: data.content || '',
+    });
+    body.append(iframe);
+    return;
+  }
+  if (data.truncated) {
+    body.append(el('div', { class: 'fileview-banner' },
+      `showing first ${fmtBytes(262144)} of ${fmtBytes(data.size||0)}`));
+  }
+  body.append(renderCodeBlock(data.content || '', guessLang(path)));
+}
+
+function syncModeButtons() {
+  $('#fileview-mode-preview').dataset.active = (fileViewState.mode === 'preview');
+  $('#fileview-mode-source').dataset.active  = (fileViewState.mode === 'source');
+}
+
+function setFileViewMode(mode) {
+  if (mode !== 'preview' && mode !== 'source') return;
+  fileViewState.mode = mode;
+  syncModeButtons();
+  renderFileView();
 }
 
 function setActiveTab(which) {
@@ -2084,6 +2168,8 @@ function bindTabbar() {
     fetchDir(ROOT);
     renderRail();
   });
+  $('#fileview-mode-preview').addEventListener('click', () => setFileViewMode('preview'));
+  $('#fileview-mode-source').addEventListener('click', () => setFileViewMode('source'));
 }
 function newChat() {
   state.messages = [];
