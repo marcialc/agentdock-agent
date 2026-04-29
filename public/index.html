@@ -1,236 +1,1705 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AgentDock Agent</title>
-    <style>
-      :root {
-        color-scheme: dark;
-        font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        background: #0b0d10;
-        color: #e7e9ee;
-        height: 100vh;
-        display: flex;
-        flex-direction: column;
-      }
-      header {
-        padding: 12px 18px;
-        border-bottom: 1px solid #1a1d22;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      header h1 {
-        margin: 0;
-        font-size: 14px;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: #9aa1ab;
-      }
-      header .meta {
-        font-size: 12px;
-        color: #6b7280;
-        font-variant-numeric: tabular-nums;
-      }
-      main {
-        flex: 1;
-        overflow-y: auto;
-        padding: 24px 18px 12px;
-      }
-      .messages {
-        max-width: 760px;
-        margin: 0 auto;
-        display: flex;
-        flex-direction: column;
-        gap: 18px;
-      }
-      .msg {
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        line-height: 1.55;
-      }
-      .msg.user { color: #c2d4ff; }
-      .msg.assistant { color: #e7e9ee; }
-      .msg .role {
-        display: inline-block;
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #6b7280;
-        margin-bottom: 4px;
-      }
-      .tools {
-        font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        font-size: 12px;
-        background: #11141a;
-        border: 1px solid #1a1d22;
-        border-radius: 6px;
-        padding: 8px 10px;
-        margin-top: 6px;
-        color: #9aa1ab;
-      }
-      .tools .name { color: #ffa657; }
-      footer {
-        border-top: 1px solid #1a1d22;
-        padding: 12px 18px 18px;
-      }
-      .composer {
-        max-width: 760px;
-        margin: 0 auto;
-        display: flex;
-        gap: 8px;
-        align-items: flex-end;
-      }
-      textarea {
-        flex: 1;
-        resize: none;
-        min-height: 44px;
-        max-height: 180px;
-        padding: 10px 12px;
-        background: #11141a;
-        color: #e7e9ee;
-        border: 1px solid #1a1d22;
-        border-radius: 8px;
-        font: inherit;
-        font-size: 14px;
-      }
-      textarea:focus { outline: 1px solid #2563eb; outline-offset: -1px; border-color: #2563eb; }
-      button {
-        padding: 10px 14px;
-        background: #2563eb;
-        color: white;
-        border: 0;
-        border-radius: 8px;
-        font: inherit;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
-      .err {
-        background: #3a1414;
-        border: 1px solid #5a1f1f;
-        color: #ffb4b4;
-        padding: 8px 10px;
-        border-radius: 6px;
-        font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        font-size: 12px;
-      }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>AgentDock Agent</h1>
-      <span class="meta" id="meta">connecting…</span>
-    </header>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AgentDock</title>
 
-    <main>
-      <div class="messages" id="messages"></div>
-    </main>
+<!-- Fonts: Inter for UI, JetBrains Mono for code. Plex Mono is loaded for the Tweak. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
-    <footer>
-      <form class="composer" id="composer">
-        <textarea id="input" placeholder="Ask the agent to inspect the sandbox, run a command, write a file…" autocomplete="off"></textarea>
-        <button type="submit" id="send">Send</button>
-      </form>
-    </footer>
+<!-- Markdown + syntax highlight -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 
-    <script>
-      const messagesEl = document.getElementById("messages");
-      const inputEl = document.getElementById("input");
-      const sendBtn = document.getElementById("send");
-      const composer = document.getElementById("composer");
-      const meta = document.getElementById("meta");
-      const conversation = [];
+<style>
+  /* ────────────────────────────────────────────────────────────────────
+     TOKENS
+  ──────────────────────────────────────────────────────────────────── */
+  :root {
+    /* dark (default) */
+    --bg:           #0b0d10;
+    --bg-1:         #11141a;     /* card */
+    --bg-2:         #161a21;     /* card-elevated */
+    --bg-3:         #1a1f27;     /* hover */
+    --line:         #1f2630;
+    --line-soft:    #161b23;
+    --text:         #e6e8eb;
+    --text-dim:     #98a0ad;
+    --text-faint:   #5b6573;
+    --accent:       oklch(0.78 0.13 155);     /* muted green */
+    --accent-soft:  oklch(0.78 0.13 155 / 0.14);
+    --accent-line:  oklch(0.78 0.13 155 / 0.40);
+    --warn:         oklch(0.78 0.13 70);      /* amber */
+    --err:          oklch(0.68 0.18 25);      /* red  */
 
-      // Use relative URLs so the agent works behind any path prefix (e.g.
-      // when AgentDock proxies it as /__sbx/<sandbox>/<port>/).
-      fetch("./health")
-        .then((r) => r.json())
-        .then((j) => {
-          meta.textContent = `model: ${j.model}`;
-        })
-        .catch(() => {
-          meta.textContent = "no /health";
-        });
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
 
-      function render() {
-        messagesEl.innerHTML = "";
-        for (const m of conversation) {
-          if (m.role === "user" || m.role === "assistant") {
-            const el = document.createElement("div");
-            el.className = `msg ${m.role}`;
-            el.innerHTML = `<div class="role">${m.role}</div>` + escape(m.content || "");
-            messagesEl.appendChild(el);
-          }
-          if (m.role === "assistant" && m.toolEvents && m.toolEvents.length) {
-            const tools = document.createElement("div");
-            tools.className = "tools";
-            tools.innerHTML = m.toolEvents
-              .map((t) => `<div><span class="name">${escape(t.name)}</span> ${escape(JSON.stringify(t.args))}</div>`)
-              .join("");
-            messagesEl.appendChild(tools);
-          }
-          if (m.role === "error") {
-            const el = document.createElement("div");
-            el.className = "err";
-            el.textContent = m.content;
-            messagesEl.appendChild(el);
-          }
-        }
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-        window.scrollTo({ top: document.body.scrollHeight });
-      }
+    --read: 70ch;
+    --radius: 10px;
+    --radius-sm: 6px;
 
-      function escape(s) {
-        return String(s)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      }
+    --shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 1px 2px rgba(0,0,0,0.5);
+  }
+  :root[data-theme="light"] {
+    --bg:        #fafaf8;
+    --bg-1:      #ffffff;
+    --bg-2:      #f3f4f1;
+    --bg-3:      #ebede9;
+    --line:      #e2e4df;
+    --line-soft: #ecede9;
+    --text:      #15181c;
+    --text-dim:  #5a626d;
+    --text-faint:#8b94a0;
+    --accent:       oklch(0.55 0.13 155);
+    --accent-soft:  oklch(0.55 0.13 155 / 0.10);
+    --accent-line:  oklch(0.55 0.13 155 / 0.35);
+    --shadow: 0 1px 0 rgba(255,255,255,0.6) inset, 0 1px 2px rgba(0,0,0,0.05);
+  }
 
-      composer.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const text = inputEl.value.trim();
-        if (!text || sendBtn.disabled) return;
-        conversation.push({ role: "user", content: text });
-        inputEl.value = "";
-        sendBtn.disabled = true;
-        render();
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection { background: var(--accent-soft); color: var(--text); }
+  button { font-family: inherit; color: inherit; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
 
-        try {
-          const apiMessages = conversation
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .map((m) => ({ role: m.role, content: m.content }));
-          const res = await fetch("./api/chat", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ messages: apiMessages }),
-          });
-          const json = await res.json();
-          if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-          conversation.push({
-            role: "assistant",
-            content: json.reply,
-            toolEvents: json.toolEvents,
-          });
-        } catch (err) {
-          conversation.push({ role: "error", content: err.message || String(err) });
-        } finally {
-          sendBtn.disabled = false;
-          render();
-          inputEl.focus();
-        }
-      });
+  /* ────────────────────────────────────────────────────────────────────
+     LAYOUT
+  ──────────────────────────────────────────────────────────────────── */
+  .app {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 0fr 1fr;
+    height: 100vh;
+    transition: grid-template-columns 220ms ease;
+  }
+  .app[data-workspace="on"] { grid-template-columns: 280px 1fr; }
 
-      inputEl.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) composer.requestSubmit();
-      });
-    </script>
-  </body>
+  .header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 18px;
+    height: 52px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(to bottom, var(--bg-1), var(--bg));
+    position: relative;
+    z-index: 5;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 600; letter-spacing: -0.01em;
+  }
+  .brand-mark {
+    width: 22px; height: 22px; border-radius: 6px;
+    background:
+      radial-gradient(circle at 30% 30%, var(--accent) 0%, transparent 60%),
+      var(--bg-2);
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .brand-mark::after {
+    content: ""; position: absolute; inset: 5px;
+    border: 1.5px solid var(--text);
+    border-radius: 3px;
+    opacity: 0.85;
+  }
+  .meta {
+    display: flex; align-items: center; gap: 14px;
+    color: var(--text-dim);
+    font-size: 12.5px;
+  }
+  .meta .pip {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  .health {
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .health-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 var(--accent);
+    animation: pulse 2.4s ease-out infinite;
+  }
+  .health[data-state="warming"] .health-dot { background: var(--warn); }
+  .health[data-state="error"] .health-dot   { background: var(--err); animation: none; }
+
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 var(--accent-soft); }
+    70%  { box-shadow: 0 0 0 8px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+
+  .header-spacer { flex: 1; }
+  .header-actions { display: flex; gap: 6px; }
+  .icon-btn, .ghost-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid transparent;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12.5px;
+    transition: all 120ms ease;
+  }
+  .icon-btn:hover, .ghost-btn:hover {
+    background: var(--bg-1); color: var(--text); border-color: var(--line);
+  }
+  .icon-btn svg, .ghost-btn svg { width: 14px; height: 14px; }
+
+  /* Workspace rail */
+  .rail {
+    grid-row: 2 / 4;
+    border-right: 1px solid var(--line);
+    background: var(--bg-1);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .app:not([data-workspace="on"]) .rail { border-right: 0; }
+  .rail-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--text-dim);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .rail-body { overflow: auto; padding: 8px 6px 12px; flex: 1; }
+  .tree { font-family: var(--mono); font-size: 12.5px; }
+  .tree-node {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 8px;
+    color: var(--text-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .tree-node:hover { background: var(--bg-2); color: var(--text); }
+  .tree-node[data-touch="r"] .tree-name::after,
+  .tree-node[data-touch="w"] .tree-name::after {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); display: inline-block; margin-left: 8px;
+    vertical-align: middle;
+  }
+  .tree-node[data-touch="w"] .tree-name::after { background: var(--warn); }
+  .tree-caret { color: var(--text-faint); width: 10px; display: inline-block; }
+  .tree-icon { color: var(--text-faint); }
+  .tree-children { padding-left: 14px; }
+  .tree-section {
+    margin-top: 14px;
+    padding: 0 12px 6px;
+    color: var(--text-faint);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: var(--sans);
+  }
+
+  /* Main column */
+  .main {
+    grid-row: 2 / 3;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 24px 24px 8px;
+  }
+  .scroll-inner {
+    max-width: calc(var(--read) + 240px);
+    margin: 0 auto;
+  }
+
+  /* Composer */
+  .composer-wrap {
+    grid-row: 3 / 4;
+    border-top: 1px solid var(--line);
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
+    padding: 12px 24px 18px;
+  }
+  .composer {
+    max-width: calc(var(--read) + 240px);
+    margin: 0 auto;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .composer:focus-within {
+    border-color: var(--accent-line);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .composer textarea {
+    width: 100%;
+    min-height: 52px;
+    max-height: 240px;
+    resize: none;
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    padding: 14px 16px 4px;
+    outline: none;
+  }
+  .composer-bar {
+    display: flex; align-items: center;
+    padding: 6px 10px 8px 14px;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    gap: 12px;
+  }
+  .kbd {
+    font-family: var(--mono); font-size: 11px;
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    color: var(--text-dim);
+    background: var(--bg-2);
+  }
+  .composer-bar .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .send {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent);
+    color: #08110b;
+    border: 0;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: filter 100ms ease, transform 100ms ease;
+  }
+  .send:hover { filter: brightness(1.06); }
+  .send:active { transform: translateY(1px); }
+  .send[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+  /* Token meter */
+  .meter {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--text-faint); font-size: 11px; font-family: var(--mono);
+  }
+  .meter-bar {
+    width: 64px; height: 4px; border-radius: 2px;
+    background: var(--bg-2); overflow: hidden;
+  }
+  .meter-bar > i {
+    display: block; height: 100%;
+    background: var(--accent);
+    transition: width 240ms ease;
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     EMPTY STATE
+  ──────────────────────────────────────────────────────────────────── */
+  .empty {
+    margin: max(8vh, 32px) auto 0;
+    max-width: 720px;
+    text-align: center;
+    color: var(--text-dim);
+    animation: fadeIn 320ms ease;
+  }
+  .empty-mark {
+    width: 48px; height: 48px; border-radius: 12px;
+    margin: 0 auto 18px;
+    background:
+      radial-gradient(circle at 30% 30%, var(--accent) 0%, transparent 65%),
+      var(--bg-1);
+    border: 1px solid var(--line);
+    position: relative;
+  }
+  .empty-mark::after {
+    content: ""; position: absolute; inset: 11px;
+    border: 1.5px solid var(--text);
+    border-radius: 5px;
+    opacity: 0.85;
+  }
+  .empty h1 {
+    font-size: 22px; font-weight: 600; letter-spacing: -0.015em;
+    color: var(--text); margin: 0 0 6px;
+  }
+  .empty p { margin: 0 0 28px; }
+  .suggestions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    text-align: left;
+  }
+  .suggestion {
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 14px 12px;
+    cursor: pointer;
+    transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    color: var(--text);
+    display: flex; flex-direction: column; gap: 8px;
+    min-height: 96px;
+  }
+  .suggestion:hover {
+    border-color: var(--accent-line);
+    background: var(--bg-2);
+    transform: translateY(-1px);
+  }
+  .suggestion .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .suggestion .body { font-size: 13.5px; line-height: 1.45; }
+  .suggestion .arrow {
+    margin-top: auto;
+    align-self: flex-end;
+    color: var(--text-faint);
+    font-family: var(--mono);
+  }
+  .suggestion:hover .arrow { color: var(--accent); }
+  .empty-foot {
+    margin-top: 22px;
+    color: var(--text-faint);
+    font-size: 12px;
+  }
+
+  /* ────────────────────────────────────────────────────────────────────
+     CONVERSATION
+  ──────────────────────────────────────────────────────────────────── */
+  .turn {
+    margin: 18px auto;
+    max-width: var(--read);
+    animation: fadeIn 240ms ease;
+  }
+  .turn.full { max-width: calc(var(--read) + 200px); }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .role {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--text-faint); font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .role .who { color: var(--text-dim); font-weight: 600; letter-spacing: 0.04em; }
+  .role .time { font-family: var(--mono); font-size: 11px; }
+  .role .spacer { flex: 1; }
+  .role .actions { display: flex; gap: 4px; opacity: 0; transition: opacity 120ms ease; }
+  .turn:hover .role .actions { opacity: 1; }
+
+  .user-msg {
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    color: var(--text);
+    white-space: pre-wrap;
+    font-size: 14px;
+  }
+
+  .assistant-msg .prose {
+    color: var(--text);
+    font-size: 14.5px;
+    line-height: 1.65;
+  }
+  .prose p { margin: 0 0 12px; }
+  .prose p:last-child { margin-bottom: 0; }
+  .prose ul, .prose ol { margin: 0 0 12px; padding-left: 22px; }
+  .prose li { margin: 2px 0; }
+  .prose code {
+    font-family: var(--mono);
+    background: var(--bg-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    border: 1px solid var(--line-soft);
+  }
+  .prose pre {
+    background: var(--bg-1) !important;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    overflow: auto;
+    margin: 0 0 12px;
+  }
+  .prose pre code {
+    background: transparent !important;
+    border: 0; padding: 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .prose strong { color: var(--text); font-weight: 600; }
+  .prose a { color: var(--accent); }
+  .prose table { border-collapse: collapse; font-size: 13px; margin-bottom: 12px; }
+  .prose th, .prose td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+
+  /* Tool stack */
+  .tool-stack {
+    display: flex; flex-direction: column; gap: 6px;
+    margin-bottom: 14px;
+  }
+  .tool {
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    transition: border-color 120ms ease;
+  }
+  .tool:hover { border-color: #2a3340; }
+  .tool-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .tool-head:hover { background: var(--bg-2); }
+  .tool-caret {
+    width: 10px; color: var(--text-faint);
+    transition: transform 160ms ease;
+    font-family: var(--mono); font-size: 10px;
+    text-align: center;
+    line-height: 1;
+  }
+  .tool[data-open="true"] .tool-caret { transform: rotate(90deg); }
+  .tool-status {
+    width: 14px; height: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .tool[data-status="error"] .tool-status { color: var(--err); }
+  .tool[data-status="running"] .tool-status { color: var(--warn); }
+  .tool-name {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+    color: var(--text);
+  }
+  .tool-summary {
+    font-family: var(--mono); font-size: 12.5px;
+    color: var(--text-dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+  }
+  .tool-summary .sep { color: var(--text-faint); margin: 0 6px; }
+  .tool-meta {
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text-faint);
+    font-family: var(--mono); font-size: 11.5px;
+    flex-shrink: 0;
+  }
+  .badge {
+    padding: 1px 6px; border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  .badge-ok    { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+  .badge-fail  { color: var(--err); border-color: oklch(0.68 0.18 25 / 0.4); }
+
+  .tool-body {
+    border-top: 1px solid var(--line-soft);
+    display: none;
+    background: var(--bg);
+  }
+  .tool[data-open="true"] .tool-body { display: block; animation: expand 180ms ease; }
+  @keyframes expand {
+    from { opacity: 0; transform: translateY(-2px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .tool-section {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .tool-section:last-child { border-bottom: 0; }
+  .tool-section-label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .tool-section-label .tabs { margin-left: auto; display: flex; gap: 2px; }
+  .tab {
+    padding: 1px 8px; border-radius: 4px;
+    background: transparent;
+    color: var(--text-faint);
+    border: 1px solid transparent;
+    font-size: 10.5px; cursor: pointer;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    font-family: var(--sans);
+  }
+  .tab[data-active="true"] {
+    color: var(--text);
+    background: var(--bg-2);
+    border-color: var(--line);
+  }
+  .tool pre.code {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    margin: 0;
+    background: transparent;
+    color: var(--text);
+    overflow: auto;
+    max-height: 360px;
+    white-space: pre;
+  }
+  .tool pre.code .ln {
+    display: inline-block;
+    width: 28px;
+    color: var(--text-faint);
+    user-select: none;
+    text-align: right;
+    padding-right: 12px;
+  }
+
+  /* shell stdout / stderr */
+  .stream { font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+  .stream .stderr { color: var(--err); }
+  .stream .meta-row {
+    display: flex; gap: 16px; margin-top: 6px;
+    padding-top: 6px; border-top: 1px dashed var(--line-soft);
+    color: var(--text-faint); font-size: 11px;
+  }
+  .stream .meta-row b { color: var(--text-dim); font-weight: 500; }
+
+  /* list_files table */
+  .files-table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: 12.5px;
+  }
+  .files-table th {
+    text-align: left; padding: 4px 8px;
+    color: var(--text-faint); font-weight: 500;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .files-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .files-table tr:last-child td { border-bottom: 0; }
+  .files-table .name { color: var(--text); }
+  .files-table .name.dir { color: var(--accent); }
+  .files-table .size, .files-table .mod { color: var(--text-dim); }
+
+  /* diff view */
+  .diff { font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .diff .row { display: flex; }
+  .diff .gut { width: 28px; flex-shrink: 0; text-align: right; padding-right: 12px; color: var(--text-faint); user-select: none; }
+  .diff .add { background: oklch(0.78 0.13 155 / 0.10); color: #c8f7dc; }
+  .diff .del { background: oklch(0.68 0.18 25 / 0.10); color: #f7c8c8; }
+  .diff .ctx { color: var(--text-dim); }
+  .diff .hunk { color: var(--text-faint); padding: 4px 0; font-style: italic; }
+
+  /* In-flight / live ghost */
+  .live {
+    background: var(--bg-1);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+  .live-row {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 12.5px;
+    color: var(--text-dim);
+    padding: 4px 0;
+  }
+  .live-row .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    animation: softPulse 1.6s ease-in-out infinite;
+  }
+  .live-row[data-state="done"] .dot { background: var(--accent); animation: none; opacity: 0.7; }
+  .live-row[data-state="running"] .dot { background: var(--warn); animation: softPulse 1.2s ease-in-out infinite; }
+  .live-row .name { color: var(--text); font-weight: 600; }
+  .live-row .summ { color: var(--text-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .live-row .t { color: var(--text-faint); font-size: 11px; }
+  @keyframes softPulse {
+    0%, 100% { opacity: 0.4; transform: scale(0.85); }
+    50%      { opacity: 1; transform: scale(1.1); }
+  }
+  .live-thinking {
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--line-soft);
+    font-size: 12.5px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .live-round {
+    color: var(--text-faint); font-family: var(--mono); font-size: 11px;
+    padding-bottom: 6px; border-bottom: 1px dashed var(--line-soft); margin-bottom: 6px;
+  }
+
+  /* Error banner */
+  .banner {
+    position: fixed;
+    top: 60px; left: 50%; transform: translateX(-50%);
+    width: min(720px, calc(100vw - 32px));
+    background: oklch(0.30 0.10 25);
+    color: #ffe3e3;
+    border: 1px solid oklch(0.68 0.18 25 / 0.5);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    z-index: 50;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    animation: slideIn 220ms ease;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translate(-50%, -8px); }
+    to   { opacity: 1; transform: translateX(-50%); }
+  }
+  .banner-row { display: flex; align-items: center; gap: 10px; }
+  .banner-msg { flex: 1; font-size: 13px; }
+  .banner-actions button {
+    background: transparent; color: inherit;
+    border: 1px solid oklch(0.68 0.18 25 / 0.5);
+    padding: 3px 8px; border-radius: 5px;
+    font-size: 11.5px; cursor: pointer;
+  }
+  .banner pre {
+    margin: 8px 0 0; padding: 8px 10px;
+    background: rgba(0,0,0,0.35);
+    border-radius: 4px;
+    font-family: var(--mono); font-size: 11.5px;
+    max-height: 180px; overflow: auto; display: none;
+  }
+  .banner[data-open="true"] pre { display: block; }
+
+  /* Tweaks panel */
+  .tweaks {
+    position: fixed;
+    right: 16px; bottom: 88px;
+    width: 280px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    display: none;
+    z-index: 40;
+    overflow: hidden;
+  }
+  .tweaks[data-open="true"] { display: block; animation: fadeIn 160ms ease; }
+  .tweaks-head {
+    display: flex; align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 12px; font-weight: 600;
+    color: var(--text);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .tweaks-head button {
+    margin-left: auto; background: transparent; border: 0;
+    color: var(--text-faint); cursor: pointer; font-size: 16px;
+  }
+  .tweaks-body { padding: 8px 12px 14px; }
+  .tweak {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--line-soft);
+  }
+  .tweak:last-child { border-bottom: 0; }
+  .tweak-label {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; color: var(--text-dim);
+  }
+  .tweak-label .v { font-family: var(--mono); color: var(--text); font-size: 11.5px; }
+  .tweak input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .tweak .seg {
+    display: flex; gap: 4px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 3px;
+  }
+  .tweak .seg button {
+    flex: 1;
+    background: transparent;
+    color: var(--text-dim);
+    border: 0;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .tweak .seg button[data-active="true"] {
+    background: var(--bg-1);
+    color: var(--text);
+    box-shadow: var(--shadow);
+  }
+  .tweak .switch {
+    width: 36px; height: 20px;
+    border-radius: 999px;
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    position: relative;
+    cursor: pointer;
+  }
+  .tweak .switch::after {
+    content: ""; position: absolute;
+    top: 1px; left: 1px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--text-faint);
+    transition: all 140ms ease;
+  }
+  .tweak .switch[data-on="true"] { background: var(--accent-soft); border-color: var(--accent-line); }
+  .tweak .switch[data-on="true"]::after { left: 17px; background: var(--accent); }
+
+  .fab {
+    position: fixed;
+    right: 16px; bottom: 24px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--bg-1);
+    color: var(--text-dim);
+    cursor: pointer;
+    z-index: 41;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .fab:hover { color: var(--text); border-color: var(--accent-line); }
+
+  /* Stop button on live turn */
+  .stop {
+    background: transparent; color: var(--text-dim);
+    border: 1px solid var(--line);
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 11.5px; cursor: pointer;
+  }
+  .stop:hover { color: var(--err); border-color: oklch(0.68 0.18 25 / 0.4); }
+
+  /* Copy button */
+  .copy-btn {
+    background: transparent; color: var(--text-faint);
+    border: 1px solid transparent;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; cursor: pointer;
+    font-family: var(--mono);
+  }
+  .copy-btn:hover { color: var(--text); background: var(--bg-2); border-color: var(--line); }
+  .copy-btn[data-copied="true"] { color: var(--accent); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--bg-3);
+    border-radius: 999px;
+    border: 2px solid var(--bg);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #2a3340; }
+
+  /* Responsive */
+  @media (max-width: 860px) {
+    .app[data-workspace="on"] { grid-template-columns: 0fr 1fr; }
+    .rail { display: none; }
+    .suggestions { grid-template-columns: 1fr; }
+    .scroll, .composer-wrap { padding-left: 14px; padding-right: 14px; }
+    .meta { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app" data-workspace="on">
+
+  <!-- ─── HEADER ─── -->
+  <header class="header" data-screen-label="header">
+    <div class="brand"><span class="brand-mark"></span> AgentDock</div>
+    <div class="meta">
+      <span class="health" id="health" data-state="ready" title="Health">
+        <span class="health-dot"></span>
+        <span id="health-label">ready</span>
+      </span>
+      <span class="pip" id="model-pip">model: claude-sonnet-4</span>
+      <span class="pip" id="sandbox-pip">sandbox: sbx_4f2a</span>
+    </div>
+    <div class="header-spacer"></div>
+    <div class="header-actions">
+      <button class="ghost-btn" id="new-chat" title="New chat (⌘N)">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10"/></svg>
+        new chat
+      </button>
+      <a class="icon-btn" href="https://github.com/" target="_blank" rel="noopener" title="repo">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38v-1.34c-2.23.49-2.69-1.07-2.69-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.81.06 1.23.83 1.23.83.72 1.23 1.88.88 2.34.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.7 7.7 0 014 0c1.53-1.03 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.51.56.82 1.28.82 2.15 0 3.07-1.87 3.74-3.65 3.94.29.25.54.74.54 1.49v2.21c0 .21.15.46.55.38A8 8 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="icon-btn" id="theme-toggle" title="Toggle theme">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M14.5 8H13M3 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ─── RAIL ─── -->
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <span>workspace</span>
+      <button class="copy-btn" id="rail-refresh" title="Refresh">↻</button>
+    </div>
+    <div class="rail-body" id="rail-body"></div>
+  </aside>
+
+  <!-- ─── MAIN ─── -->
+  <main class="main">
+    <div class="scroll" id="scroll">
+      <div class="scroll-inner" id="thread"></div>
+    </div>
+
+    <div class="composer-wrap">
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Ask the agent…"></textarea>
+        <div class="composer-bar">
+          <span><span class="kbd">↵</span> send · <span class="kbd">⌘</span><span class="kbd">↵</span> newline</span>
+          <span><span class="kbd">/</span> focus</span>
+          <span><span class="kbd">⌘</span><span class="kbd">,</span> tweaks</span>
+          <span class="right">
+            <span class="meter" title="Token budget this session">
+              <span id="meter-num">0 / 200k</span>
+              <span class="meter-bar"><i id="meter-fill" style="width:0%"></i></span>
+            </span>
+            <button class="send" id="send" disabled>
+              send
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<!-- Tweaks -->
+<button class="fab" id="tweaks-fab" title="Tweaks (⌘,)">
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="5" r="1.5"/><circle cx="11" cy="11" r="1.5"/><path d="M2 5h2M6.5 5H14M2 11h7.5M12.5 11H14"/></svg>
+</button>
+<div class="tweaks" id="tweaks">
+  <div class="tweaks-head">
+    Tweaks
+    <button id="tweaks-close">×</button>
+  </div>
+  <div class="tweaks-body">
+    <div class="tweak">
+      <div class="tweak-label">Workspace panel <span class="v" id="t-ws-v">on</span></div>
+      <div class="switch" id="t-ws" data-on="true"></div>
+    </div>
+    <div class="tweak">
+      <div class="tweak-label">Reading width <span class="v" id="t-read-v">70ch</span></div>
+      <input type="range" id="t-read" min="60" max="90" step="2" value="70" />
+    </div>
+    <div class="tweak">
+      <div class="tweak-label">Mono font</div>
+      <div class="seg" id="t-mono">
+        <button data-val="JetBrains Mono" data-active="true">JetBrains</button>
+        <button data-val="IBM Plex Mono">Plex</button>
+        <button data-val="ui-monospace">System</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Speaker notes / mock data + behavior loaded below -->
+<script>
+/* ============================================================
+   AgentDock chat UI
+   Single-file, vanilla JS. Mocked backend hits ./api/chat /
+   ./health if available, falls back to a local fixture.
+   ============================================================ */
+
+// ---------- utilities ----------
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const el = (tag, attrs={}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'html') n.innerHTML = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) n.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) {
+    if (k == null) continue;
+    n.append(k.nodeType ? k : document.createTextNode(k));
+  }
+  return n;
+};
+const fmtTime = (d=new Date()) => d.toTimeString().slice(0,5);
+const fmtBytes = b => b<1024 ? b+' B' : b<1024*1024 ? (b/1024).toFixed(1)+' kB' : (b/1024/1024).toFixed(1)+' MB';
+const escHtml = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const summarize = (name, args) => {
+  if (!args) return '';
+  if (name === 'shell')      return args.cmd || args.command || '';
+  if (name === 'read_file')  return args.path || '';
+  if (name === 'write_file') return args.path || '';
+  if (name === 'list_files') return args.path || '';
+  return JSON.stringify(args);
+};
+
+// marked + hljs
+marked.setOptions({
+  breaks: true,
+  highlight: (code, lang) => {
+    try {
+      if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, {language: lang}).value;
+      return hljs.highlightAuto(code).value;
+    } catch(e) { return escHtml(code); }
+  }
+});
+
+// ---------- state ----------
+const state = {
+  messages: [],         // [{role, content, time, tools?: [...]}, ...]
+  inflight: null,       // running turn descriptor
+  model: 'claude-sonnet-4',
+  sandbox: 'sbx_4f2a',
+  health: 'ready',
+  banner: null,
+  tweaks: { workspace: true, read: 70, mono: 'JetBrains Mono' },
+  tokens: 0,
+  tokenBudget: 200_000,
+};
+
+// ---------- mock backend ----------
+// Tries real endpoints first; on failure falls back to fixtures so the
+// page is fully usable without a server.
+const MOCK = {
+  health: { ok: true, model: 'claude-sonnet-4' },
+  responder(messages) {
+    const last = (messages.filter(m => m.role==='user').at(-1)?.content || '').toLowerCase();
+
+    if (/list|ls|files|workspace/.test(last)) {
+      return {
+        toolEvents: [
+          { name: 'shell', args: { cmd: 'ls -la /workspace/openclaw' },
+            result: { stdout:
+`total 36
+drwxr-xr-x  6 dev  dev   192 Apr 28 14:01 .
+drwxr-xr-x  3 dev  dev    96 Apr 28 13:58 ..
+-rw-r--r--  1 dev  dev   142 Apr 28 14:01 .gitignore
+-rw-r--r--  1 dev  dev  1421 Apr 28 14:01 package.json
+-rw-r--r--  1 dev  dev   612 Apr 28 14:01 README.md
+drwxr-xr-x  4 dev  dev   128 Apr 28 14:01 src
+-rw-r--r--  1 dev  dev   381 Apr 28 14:01 tsconfig.json`,
+              stderr:'', exit_code: 0, ms: 84 } },
+          { name: 'list_files', args: { path: '/workspace/openclaw' },
+            result: { entries: [
+              { name: 'src',          type: 'dir',  size: 0,    mtime: '2026-04-28 14:01' },
+              { name: 'package.json', type: 'file', size: 1421, mtime: '2026-04-28 14:01' },
+              { name: 'README.md',    type: 'file', size: 612,  mtime: '2026-04-28 14:01' },
+              { name: 'tsconfig.json',type: 'file', size: 381,  mtime: '2026-04-28 14:01' },
+              { name: '.gitignore',   type: 'file', size: 142,  mtime: '2026-04-28 14:01' }
+            ], ms: 11 } }
+        ],
+        reply: `Here's what's in **/workspace/openclaw**:
+
+- \`src/\` — source tree
+- \`package.json\` — manifest (1.4 kB)
+- \`README.md\` — short, points at \`pnpm dev\`
+- \`tsconfig.json\`, \`.gitignore\`
+
+Want me to read \`package.json\` or open \`src/\`?`
+      };
+    }
+
+    if (/package\.json|scripts/.test(last)) {
+      const pkg = `{
+  "name": "openclaw",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "vite": "^5.2.0",
+    "vitest": "^1.6.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.0"
+  }
+}`;
+      return {
+        toolEvents: [
+          { name: 'read_file', args: { path: '/workspace/openclaw/package.json' },
+            result: { contents: pkg, lang: 'json', size: pkg.length, ms: 12 } }
+        ],
+        reply: `\`package.json\` has four scripts:
+
+| script | command |
+|---|---|
+| \`dev\` | \`vite\` |
+| \`build\` | \`vite build\` |
+| \`test\` | \`vitest run\` |
+| \`lint\` | \`eslint src\` |
+
+The deps are React 18 + Vite 5 + Vitest 1. Want me to run \`pnpm test\`?`
+      };
+    }
+
+    if (/hello|create|run|tsx|ts/.test(last)) {
+      const before =
+`// stub
+console.log('todo');
+`;
+      const after =
+`// hello.ts — written by AgentDock
+const greet = (name: string) => \`hello, \${name}\`;
+console.log(greet('agentdock'));
+`;
+      return {
+        toolEvents: [
+          { name: 'write_file', args: { path: '/workspace/openclaw/hello.ts' },
+            result: { before, after, size: after.length, lang: 'typescript', ms: 8 } },
+          { name: 'shell', args: { cmd: 'cd /workspace/openclaw && tsc hello.ts && node hello.js' },
+            result: { stdout: 'hello, agentdock\n', stderr: '', exit_code: 0, ms: 612 } }
+        ],
+        reply: `Wrote \`hello.ts\` and ran it through \`tsc\`. Output:
+
+\`\`\`
+hello, agentdock
+\`\`\`
+
+The file's still in the sandbox — want me to wire it into a script in \`package.json\`?`
+      };
+    }
+
+    // generic fallback
+    return {
+      toolEvents: [
+        { name: 'shell', args: { cmd: 'pwd && whoami && date' },
+          result: { stdout: '/workspace\nagent\nMon Apr 28 14:02:11 UTC 2026\n', stderr:'', exit_code:0, ms: 22 } }
+      ],
+      reply: `I'm in **/workspace** as \`agent\`. Try one of:\n\n- \`list files in /workspace/openclaw\`\n- \`show package.json\`\n- \`create hello.ts and run it\``
+    };
+  }
+};
+
+async function fetchHealth() {
+  try {
+    const r = await fetch('./health', { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch { return MOCK.health; }
+}
+
+async function postChat(messages) {
+  // Try real backend; fall back to mock with a small synthetic delay.
+  try {
+    const r = await fetch('./api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages, model: state.model })
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(()=>'(no body)');
+      throw Object.assign(new Error(`${r.status} ${r.statusText}`), { payload: text });
+    }
+    return await r.json();
+  } catch (e) {
+    if (e.payload !== undefined) throw e;
+    // network/missing endpoint → mocked response
+    await sleep(180 + Math.random()*220);
+    const r = MOCK.responder(messages);
+    return { reply: r.reply, messages: [...messages, { role:'assistant', content: r.reply }], toolEvents: r.toolEvents };
+  }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---------- rendering ----------
+function renderHeader() {
+  $('#model-pip').textContent = `model: ${state.model}`;
+  $('#sandbox-pip').textContent = `sandbox: ${state.sandbox}`;
+  const h = $('#health');
+  h.dataset.state = state.health;
+  $('#health-label').textContent = state.health;
+}
+
+function renderEmpty() {
+  const prompts = [
+    { label: 'explore', body: 'list files in /workspace/openclaw' },
+    { label: 'inspect', body: 'show package.json' },
+    { label: 'execute', body: 'create hello.ts and run it' },
+  ];
+  return el('div', { class: 'empty' },
+    el('div', { class: 'empty-mark' }),
+    el('h1', {}, 'Ready when you are.'),
+    el('p', {}, 'Ask the agent to explore, read, or run things in /workspace.'),
+    el('div', { class: 'suggestions' },
+      ...prompts.map(p => el('button', {
+        class: 'suggestion',
+        onclick: () => { $('#input').value = p.body; autosize(); $('#input').focus(); send(); }
+      },
+        el('div', { class: 'label' }, p.label),
+        el('div', { class: 'body' }, p.body),
+        el('div', { class: 'arrow' }, '→')
+      ))
+    ),
+    el('div', { class: 'empty-foot' }, 'Type ', el('span', {class:'kbd'}, '/'), ' to focus, ', el('span',{class:'kbd'},'↵'),' to send.')
+  );
+}
+
+function renderToolHead(t, statusOverride) {
+  const status = statusOverride || (t.result?.exit_code === undefined ? 'ok' : (t.result.exit_code === 0 ? 'ok' : 'fail'));
+  const okIcon  = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>`;
+  const runIcon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="5" stroke-dasharray="2 3"><animateTransform attributeName="transform" type="rotate" from="0 8 8" to="360 8 8" dur="1.4s" repeatCount="indefinite"/></circle></svg>`;
+  const errIcon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l10 10M13 3L3 13"/></svg>`;
+
+  const summary = summarize(t.name, t.args);
+  const ms = t.result?.ms;
+  return el('div', { class: 'tool-head' },
+    el('span', { class: 'tool-caret' }, '▸'),
+    el('span', { class: 'tool-status', html: status==='running' ? runIcon : status==='fail' ? errIcon : okIcon }),
+    el('span', { class: 'tool-name' }, t.name),
+    el('span', { class: 'tool-summary' },
+      el('span', { class: 'sep' }, '·'),
+      summary
+    ),
+    el('span', { class: 'tool-meta' },
+      ms != null ? el('span', {}, `${ms} ms`) : null,
+      t.result?.exit_code === 0 ? el('span', { class: 'badge badge-ok' }, 'exit 0') :
+      t.result?.exit_code > 0    ? el('span', { class: 'badge badge-fail' }, `exit ${t.result.exit_code}`) :
+      t.result?.size != null     ? el('span', { class: 'badge' }, fmtBytes(t.result.size)) : null
+    )
+  );
+}
+
+function renderToolBody(t) {
+  const body = el('div', { class: 'tool-body' });
+  // args
+  body.append(el('div', { class: 'tool-section' },
+    el('div', { class: 'tool-section-label' }, 'args'),
+    el('pre', { class: 'code' }, JSON.stringify(t.args, null, 2))
+  ));
+  // result — switch by tool name
+  const r = t.result || {};
+  let resultEl;
+  if (t.name === 'shell') {
+    resultEl = el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, 'result'),
+      el('div', { class: 'stream' },
+        r.stdout ? el('pre', {class:'code', html: escHtml(r.stdout)}) : null,
+        r.stderr ? el('pre', {class:'code stderr', html: escHtml(r.stderr)}) : null,
+        el('div', { class: 'meta-row' },
+          el('span', {}, el('b', {}, 'exit'), ' ', String(r.exit_code ?? 0)),
+          el('span', {}, el('b', {}, 'duration'), ' ', `${r.ms ?? '—'} ms`)
+        )
+      )
+    );
+  } else if (t.name === 'list_files') {
+    const tbl = el('table', { class: 'files-table' },
+      el('thead', {}, el('tr', {},
+        el('th', {}, 'name'), el('th', {}, 'type'), el('th', {}, 'size'), el('th', {}, 'modified')
+      )),
+      el('tbody', {}, ...(r.entries||[]).map(e => el('tr', {},
+        el('td', {}, el('span', { class: 'name' + (e.type==='dir'?' dir':'') }, e.type==='dir' ? e.name + '/' : e.name)),
+        el('td', { class: 'mod' }, e.type),
+        el('td', { class: 'size' }, e.type==='dir' ? '—' : fmtBytes(e.size)),
+        el('td', { class: 'mod' }, e.mtime || '—')
+      )))
+    );
+    resultEl = el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, `result · ${(r.entries||[]).length} entries`),
+      tbl
+    );
+  } else if (t.name === 'read_file') {
+    resultEl = el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, `result · ${fmtBytes(r.size||0)}`),
+      renderCodeBlock(r.contents || '', r.lang || 'plaintext')
+    );
+  } else if (t.name === 'write_file') {
+    // diff toggle
+    const sec = el('div', { class: 'tool-section' });
+    const label = el('div', { class: 'tool-section-label' }, `result · ${fmtBytes(r.size||0)}`,
+      el('span', { class: 'tabs' },
+        el('button', { class:'tab', 'data-active':'true', onclick: e => switchTab(e,'diff') }, 'diff'),
+        el('button', { class:'tab', onclick: e => switchTab(e,'after') }, 'after')
+      )
+    );
+    sec.append(label);
+    const view = el('div', {});
+    sec.append(view);
+    function switchTab(ev, which) {
+      $$('.tab', label).forEach(b => b.dataset.active = (b.textContent===which));
+      view.innerHTML = '';
+      if (which === 'diff') view.append(renderDiff(r.before||'', r.after||''));
+      else                  view.append(renderCodeBlock(r.after||'', r.lang||'plaintext'));
+    }
+    view.append(renderDiff(r.before||'', r.after||''));
+    resultEl = sec;
+  } else {
+    resultEl = el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, 'result'),
+      el('pre', { class: 'code' }, JSON.stringify(r, null, 2))
+    );
+  }
+  body.append(resultEl);
+  return body;
+}
+
+function renderCodeBlock(code, lang) {
+  const lines = code.split('\n');
+  const wrap = el('pre', { class: 'code hljs' });
+  let highlighted = '';
+  try {
+    highlighted = lang && hljs.getLanguage(lang)
+      ? hljs.highlight(code, {language: lang}).value
+      : hljs.highlightAuto(code).value;
+  } catch { highlighted = escHtml(code); }
+  // Inject line numbers
+  const hLines = highlighted.split('\n');
+  wrap.innerHTML = hLines.map((line,i) =>
+    `<span class="ln">${i+1}</span>${line}`
+  ).join('\n');
+  return wrap;
+}
+
+function renderDiff(before, after) {
+  // Tiny LCS-free diff: line-by-line, mark adds/dels by position.
+  // Good enough for demo; backend will replace with real diff.
+  const a = before.split('\n');
+  const b = after.split('\n');
+  const wrap = el('div', { class: 'diff hljs' });
+  wrap.append(el('div', { class: 'hunk' }, `@@ -1,${a.length} +1,${b.length} @@`));
+  const max = Math.max(a.length, b.length);
+  let an = 0, bn = 0;
+  for (let i = 0; i < max; i++) {
+    const av = a[i], bv = b[i];
+    if (av !== undefined && bv !== undefined && av === bv) {
+      wrap.append(rowEl(' ', ++an, av, 'ctx'));
+      bn++;
+    } else {
+      if (av !== undefined) wrap.append(rowEl('-', ++an, av, 'del'));
+      if (bv !== undefined) wrap.append(rowEl('+', ++bn, bv, 'add'));
+    }
+  }
+  return wrap;
+  function rowEl(sign, n, text, klass) {
+    return el('div', { class: 'row ' + klass },
+      el('span', { class: 'gut' }, String(n)),
+      el('span', {}, sign + ' ' + text)
+    );
+  }
+}
+
+function renderToolCard(t) {
+  const card = el('div', { class: 'tool', 'data-open': 'false', 'data-status': t.result?.exit_code > 0 ? 'error' : 'ok' });
+  const head = renderToolHead(t);
+  head.addEventListener('click', () => {
+    card.dataset.open = card.dataset.open === 'true' ? 'false' : 'true';
+  });
+  card.append(head, renderToolBody(t));
+  return card;
+}
+
+function renderUserTurn(m) {
+  const turn = el('div', { class: 'turn' },
+    el('div', { class: 'role' },
+      el('span', { class: 'who' }, 'you'),
+      el('span', { class: 'time' }, m.time),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'actions' },
+        el('button', { class: 'copy-btn', onclick: e => copyText(e, m.content) }, 'copy')
+      )
+    ),
+    el('div', { class: 'user-msg' }, m.content)
+  );
+  return turn;
+}
+
+function renderAssistantTurn(m) {
+  const wrap = el('div', { class: 'turn full assistant-msg' });
+  wrap.append(el('div', { class: 'role' },
+    el('span', { class: 'who' }, 'agent'),
+    el('span', { class: 'time' }, m.time),
+    el('span', { class: 'spacer' }),
+    el('span', { class: 'actions' },
+      el('button', { class: 'copy-btn', onclick: e => copyText(e, m.content) }, 'copy')
+    )
+  ));
+  if (m.tools?.length) {
+    const stack = el('div', { class: 'tool-stack' });
+    m.tools.forEach(t => stack.append(renderToolCard(t)));
+    wrap.append(stack);
+  }
+  const prose = el('div', { class: 'prose', html: marked.parse(m.content || '') });
+  wrap.append(prose);
+  return wrap;
+}
+
+function renderLive(turn) {
+  // turn = { rounds, currentRound, tools: [{name, args, status, ms?}], thinking }
+  const wrap = el('div', { class: 'turn full' });
+  wrap.append(el('div', { class: 'role' },
+    el('span', { class: 'who' }, 'agent'),
+    el('span', { class: 'time' }, fmtTime()),
+    el('span', { class: 'spacer' }),
+    el('span', { class: 'actions' },
+      el('button', { class: 'stop', onclick: stopTurn }, 'stop')
+    )
+  ));
+  const live = el('div', { class: 'live' });
+  live.append(el('div', { class: 'live-round' }, `round ${turn.currentRound} of ${turn.rounds}`));
+  for (const t of turn.tools) {
+    live.append(el('div', { class: 'live-row', 'data-state': t.status },
+      el('span', { class: 'dot' }),
+      el('span', { class: 'name' }, t.name),
+      el('span', { class: 'summ' }, summarize(t.name, t.args)),
+      el('span', { class: 't' }, t.status === 'done' ? `✓ ${t.ms ?? '—'} ms` : t.status === 'running' ? '…' : '')
+    ));
+  }
+  if (turn.thinking) {
+    live.append(el('div', { class: 'live-thinking' },
+      el('span', { class: 'dot', style: 'width:7px;height:7px;border-radius:50%;background:var(--accent);animation:softPulse 1.4s ease-in-out infinite;display:inline-block' }),
+      'thinking…'
+    ));
+  }
+  wrap.append(live);
+  return wrap;
+}
+
+function copyText(e, txt) {
+  navigator.clipboard?.writeText(txt);
+  const b = e.currentTarget;
+  b.dataset.copied = 'true';
+  b.textContent = 'copied';
+  setTimeout(() => { b.dataset.copied = 'false'; b.textContent = 'copy'; }, 1100);
+}
+
+// ---------- thread render ----------
+function renderThread() {
+  const t = $('#thread');
+  t.innerHTML = '';
+  if (state.messages.length === 0 && !state.inflight) {
+    t.append(renderEmpty());
+    return;
+  }
+  for (const m of state.messages) {
+    if (m.role === 'user') t.append(renderUserTurn(m));
+    else                   t.append(renderAssistantTurn(m));
+  }
+  if (state.inflight) t.append(renderLive(state.inflight));
+  // scroll to bottom
+  requestAnimationFrame(() => { $('#scroll').scrollTop = $('#scroll').scrollHeight; });
+}
+
+// ---------- workspace rail ----------
+const FS = {
+  '/workspace': { type:'dir', children: ['openclaw', 'scratch', 'hello.ts'] },
+  '/workspace/openclaw': { type:'dir', children: ['src', 'package.json', 'README.md', 'tsconfig.json', '.gitignore'] },
+  '/workspace/openclaw/src': { type:'dir', children: ['main.tsx', 'App.tsx', 'styles.css'] },
+  '/workspace/scratch': { type:'dir', children: ['notes.md'] },
+};
+const open = new Set(['/workspace', '/workspace/openclaw']);
+const touched = {}; // path -> 'r' | 'w'
+
+function renderRail() {
+  const body = $('#rail-body');
+  body.innerHTML = '';
+  body.append(renderTreeNode('/workspace'));
+  // touched-this-turn
+  const t = Object.entries(touched);
+  if (t.length) {
+    body.append(el('div', { class: 'tree-section' }, 'touched this turn'));
+    const wrap = el('div', { class: 'tree' });
+    for (const [path, kind] of t) {
+      wrap.append(el('div', { class: 'tree-node', 'data-touch': kind },
+        el('span', { class: 'tree-caret' }, ''),
+        el('span', { class: 'tree-icon' }, kind==='w'?'◆':'●'),
+        el('span', { class: 'tree-name' }, path.replace('/workspace/', ''))
+      ));
+    }
+    body.append(wrap);
+  }
+}
+function renderTreeNode(path) {
+  const node = FS[path];
+  const name = path.split('/').pop() || path;
+  if (!node || node.type === 'file') {
+    return el('div', { class: 'tree-node', 'data-touch': touched[path]||'' },
+      el('span', { class: 'tree-caret' }, ''),
+      el('span', { class: 'tree-icon' }, '·'),
+      el('span', { class: 'tree-name' }, name || path)
+    );
+  }
+  const opened = open.has(path);
+  const wrap = el('div', {});
+  const head = el('div', { class: 'tree-node', onclick: () => {
+    if (opened) open.delete(path); else open.add(path);
+    renderRail();
+  }},
+    el('span', { class: 'tree-caret' }, opened ? '▾' : '▸'),
+    el('span', { class: 'tree-icon' }, '▣'),
+    el('span', { class: 'tree-name' }, (name||'workspace') + '/')
+  );
+  wrap.append(head);
+  if (opened) {
+    const kids = el('div', { class: 'tree-children' });
+    for (const c of node.children) {
+      const child = path === '/' ? `/${c}` : `${path}/${c}`;
+      kids.append(renderTreeNode(child));
+    }
+    wrap.append(kids);
+  }
+  return wrap;
+}
+
+// ---------- send / turn lifecycle ----------
+async function send() {
+  const input = $('#input');
+  const text = input.value.trim();
+  if (!text || state.inflight) return;
+  const userMsg = { role:'user', content:text, time: fmtTime() };
+  state.messages.push(userMsg);
+  state.tokens += Math.ceil(text.length / 4);
+  input.value = '';
+  autosize();
+  $('#send').disabled = true;
+  // start inflight
+  state.inflight = { rounds: 12, currentRound: 1, tools: [], thinking: true };
+  renderThread();
+
+  try {
+    // Mock progressive tool-call animation: peek at the eventual response,
+    // animate each tool entry into the live ghost, then commit.
+    const peek = MOCK.responder(state.messages); // safe even when real backend is in use; we still animate from this
+    for (let i = 0; i < peek.toolEvents.length; i++) {
+      const t = peek.toolEvents[i];
+      state.inflight.tools.push({ name: t.name, args: t.args, status: 'running' });
+      renderThread();
+      await sleep(280 + Math.random()*350);
+      state.inflight.tools[i].status = 'done';
+      state.inflight.tools[i].ms = t.result?.ms ?? Math.floor(Math.random()*180)+20;
+      state.inflight.currentRound = Math.min(state.inflight.currentRound + 1, state.inflight.rounds);
+      // mark fs touch
+      if (t.name === 'read_file')  touched[t.args.path] = 'r';
+      if (t.name === 'write_file') touched[t.args.path] = 'w';
+      renderThread();
+      renderRail();
+    }
+    state.inflight.thinking = true;
+    renderThread();
+
+    // real call (hits mock fallback if endpoint missing)
+    const data = await postChat(state.messages);
+    const assistantMsg = {
+      role: 'assistant',
+      content: data.reply,
+      time: fmtTime(),
+      tools: data.toolEvents || []
+    };
+    state.messages.push(assistantMsg);
+    state.tokens += Math.ceil((data.reply||'').length / 4);
+  } catch (e) {
+    showBanner(e.message || 'Request failed', e.payload);
+  } finally {
+    state.inflight = null;
+    $('#send').disabled = !$('#input').value.trim();
+    renderMeter();
+    renderThread();
+  }
+}
+
+function stopTurn() {
+  state.inflight = null;
+  renderThread();
+}
+
+// ---------- banner ----------
+function showBanner(msg, payload) {
+  if (state.banner) state.banner.remove();
+  const b = el('div', { class: 'banner', 'data-open':'false' },
+    el('div', { class: 'banner-row' },
+      el('span', { class: 'banner-msg' }, '⚠ ' + msg),
+      el('span', { class: 'banner-actions' },
+        payload ? el('button', { onclick: () => b.dataset.open = b.dataset.open==='true'?'false':'true' }, 'details') : null,
+        el('button', { onclick: () => b.remove() }, 'dismiss')
+      )
+    ),
+    payload ? el('pre', {}, typeof payload === 'string' ? payload : JSON.stringify(payload,null,2)) : null
+  );
+  document.body.append(b);
+  state.banner = b;
+}
+
+// ---------- composer ----------
+function autosize() {
+  const ta = $('#input');
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(240, ta.scrollHeight) + 'px';
+  $('#send').disabled = !ta.value.trim() || !!state.inflight;
+}
+function bindComposer() {
+  const ta = $('#input');
+  ta.addEventListener('input', autosize);
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); }
+  });
+  $('#send').addEventListener('click', send);
+}
+function renderMeter() {
+  const pct = Math.min(100, (state.tokens / state.tokenBudget) * 100);
+  $('#meter-fill').style.width = pct + '%';
+  $('#meter-num').textContent = `${formatTokens(state.tokens)} / ${formatTokens(state.tokenBudget)}`;
+}
+function formatTokens(n) {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return (n/1000).toFixed(n<10000?1:0) + 'k';
+  return (n/1_000_000).toFixed(1)+'m';
+}
+
+// ---------- tweaks ----------
+function bindTweaks() {
+  const open = ()  => $('#tweaks').dataset.open = 'true';
+  const close = () => $('#tweaks').dataset.open = 'false';
+  $('#tweaks-fab').addEventListener('click', () => {
+    $('#tweaks').dataset.open = $('#tweaks').dataset.open === 'true' ? 'false' : 'true';
+  });
+  $('#tweaks-close').addEventListener('click', close);
+
+  const ws = $('#t-ws');
+  ws.addEventListener('click', () => {
+    state.tweaks.workspace = !state.tweaks.workspace;
+    ws.dataset.on = state.tweaks.workspace;
+    $('#t-ws-v').textContent = state.tweaks.workspace ? 'on' : 'off';
+    $('#app').dataset.workspace = state.tweaks.workspace ? 'on' : 'off';
+    if (state.tweaks.workspace) renderRail();
+  });
+
+  const read = $('#t-read');
+  read.addEventListener('input', () => {
+    const v = +read.value;
+    state.tweaks.read = v;
+    document.documentElement.style.setProperty('--read', v + 'ch');
+    $('#t-read-v').textContent = v + 'ch';
+  });
+
+  $$('#t-mono button').forEach(b => b.addEventListener('click', () => {
+    $$('#t-mono button').forEach(x => x.dataset.active = 'false');
+    b.dataset.active = 'true';
+    state.tweaks.mono = b.dataset.val;
+    document.documentElement.style.setProperty('--mono',
+      `'${b.dataset.val}', ui-monospace, SFMono-Regular, Menlo, monospace`);
+  }));
+}
+
+// ---------- theme ----------
+function bindTheme() {
+  $('#theme-toggle').addEventListener('click', () => {
+    const cur = document.documentElement.dataset.theme;
+    document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+  });
+}
+
+// ---------- shortcuts ----------
+function bindShortcuts() {
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== $('#input')) {
+      e.preventDefault();
+      $('#input').focus();
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+      e.preventDefault();
+      $('#tweaks').dataset.open = $('#tweaks').dataset.open === 'true' ? 'false' : 'true';
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && e.shiftKey) {
+      e.preventDefault();
+      newChat();
+    }
+  });
+  $('#new-chat').addEventListener('click', newChat);
+}
+function newChat() {
+  state.messages = [];
+  state.inflight = null;
+  state.tokens = 0;
+  for (const k of Object.keys(touched)) delete touched[k];
+  renderThread();
+  renderMeter();
+  renderRail();
+  $('#input').focus();
+}
+
+// ---------- demo seed: multi-turn explore → edit → run ----------
+function seedDemo() {
+  // Pre-baked transcript so the page lands on a meaningful state.
+  const t1 = MOCK.responder([{role:'user', content:'list files in /workspace/openclaw'}]);
+  const t2 = MOCK.responder([{role:'user', content:'show package.json'}]);
+  const t3 = MOCK.responder([{role:'user', content:'create hello.ts and run it'}]);
+  state.messages = [
+    { role:'user', content:'list files in /workspace/openclaw', time:'14:01' },
+    { role:'assistant', content: t1.reply, time:'14:01', tools: t1.toolEvents },
+    { role:'user', content:'show package.json and tell me which scripts I have', time:'14:02' },
+    { role:'assistant', content: t2.reply, time:'14:02', tools: t2.toolEvents },
+    { role:'user', content:'create hello.ts and run it', time:'14:03' },
+    { role:'assistant', content: t3.reply, time:'14:03', tools: t3.toolEvents },
+  ];
+  // Reflect filesystem touches in the rail
+  touched['/workspace/openclaw/package.json'] = 'r';
+  touched['/workspace/openclaw/hello.ts']     = 'w';
+  state.tokens = 4_200;
+  // Auto-expand the read_file in the second turn so a user landing on the
+  // demo sees what an expanded card looks like.
+  setTimeout(() => {
+    const cards = $$('.tool');
+    if (cards[2]) cards[2].dataset.open = 'true';
+  }, 150);
+}
+
+// ---------- init ----------
+async function init() {
+  bindComposer();
+  bindTheme();
+  bindShortcuts();
+  bindTweaks();
+  // Health
+  const h = await fetchHealth();
+  state.model = h.model || state.model;
+  state.health = h.ok ? 'ready' : 'error';
+  renderHeader();
+  // Allow ?empty=1 for the empty state
+  const params = new URLSearchParams(location.search);
+  if (!params.has('empty')) seedDemo();
+  renderThread();
+  renderRail();
+  renderMeter();
+}
+init();
+</script>
+
+</body>
 </html>
