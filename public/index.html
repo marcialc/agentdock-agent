@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentDock Agent</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #0b0d10;
+        color: #e7e9ee;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 12px 18px;
+        border-bottom: 1px solid #1a1d22;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #9aa1ab;
+      }
+      header .meta {
+        font-size: 12px;
+        color: #6b7280;
+        font-variant-numeric: tabular-nums;
+      }
+      main {
+        flex: 1;
+        overflow-y: auto;
+        padding: 24px 18px 12px;
+      }
+      .messages {
+        max-width: 760px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .msg {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        line-height: 1.55;
+      }
+      .msg.user { color: #c2d4ff; }
+      .msg.assistant { color: #e7e9ee; }
+      .msg .role {
+        display: inline-block;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6b7280;
+        margin-bottom: 4px;
+      }
+      .tools {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 12px;
+        background: #11141a;
+        border: 1px solid #1a1d22;
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-top: 6px;
+        color: #9aa1ab;
+      }
+      .tools .name { color: #ffa657; }
+      footer {
+        border-top: 1px solid #1a1d22;
+        padding: 12px 18px 18px;
+      }
+      .composer {
+        max-width: 760px;
+        margin: 0 auto;
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+      }
+      textarea {
+        flex: 1;
+        resize: none;
+        min-height: 44px;
+        max-height: 180px;
+        padding: 10px 12px;
+        background: #11141a;
+        color: #e7e9ee;
+        border: 1px solid #1a1d22;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 14px;
+      }
+      textarea:focus { outline: 1px solid #2563eb; outline-offset: -1px; border-color: #2563eb; }
+      button {
+        padding: 10px 14px;
+        background: #2563eb;
+        color: white;
+        border: 0;
+        border-radius: 8px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .err {
+        background: #3a1414;
+        border: 1px solid #5a1f1f;
+        color: #ffb4b4;
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>AgentDock Agent</h1>
+      <span class="meta" id="meta">connecting…</span>
+    </header>
+
+    <main>
+      <div class="messages" id="messages"></div>
+    </main>
+
+    <footer>
+      <form class="composer" id="composer">
+        <textarea id="input" placeholder="Ask the agent to inspect the sandbox, run a command, write a file…" autocomplete="off"></textarea>
+        <button type="submit" id="send">Send</button>
+      </form>
+    </footer>
+
+    <script>
+      const messagesEl = document.getElementById("messages");
+      const inputEl = document.getElementById("input");
+      const sendBtn = document.getElementById("send");
+      const composer = document.getElementById("composer");
+      const meta = document.getElementById("meta");
+      const conversation = [];
+
+      fetch("/health")
+        .then((r) => r.json())
+        .then((j) => {
+          meta.textContent = `model: ${j.model}`;
+        })
+        .catch(() => {
+          meta.textContent = "no /health";
+        });
+
+      function render() {
+        messagesEl.innerHTML = "";
+        for (const m of conversation) {
+          if (m.role === "user" || m.role === "assistant") {
+            const el = document.createElement("div");
+            el.className = `msg ${m.role}`;
+            el.innerHTML = `<div class="role">${m.role}</div>` + escape(m.content || "");
+            messagesEl.appendChild(el);
+          }
+          if (m.role === "assistant" && m.toolEvents && m.toolEvents.length) {
+            const tools = document.createElement("div");
+            tools.className = "tools";
+            tools.innerHTML = m.toolEvents
+              .map((t) => `<div><span class="name">${escape(t.name)}</span> ${escape(JSON.stringify(t.args))}</div>`)
+              .join("");
+            messagesEl.appendChild(tools);
+          }
+          if (m.role === "error") {
+            const el = document.createElement("div");
+            el.className = "err";
+            el.textContent = m.content;
+            messagesEl.appendChild(el);
+          }
+        }
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        window.scrollTo({ top: document.body.scrollHeight });
+      }
+
+      function escape(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      composer.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const text = inputEl.value.trim();
+        if (!text || sendBtn.disabled) return;
+        conversation.push({ role: "user", content: text });
+        inputEl.value = "";
+        sendBtn.disabled = true;
+        render();
+
+        try {
+          const apiMessages = conversation
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => ({ role: m.role, content: m.content }));
+          const res = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ messages: apiMessages }),
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+          conversation.push({
+            role: "assistant",
+            content: json.reply,
+            toolEvents: json.toolEvents,
+          });
+        } catch (err) {
+          conversation.push({ role: "error", content: err.message || String(err) });
+        } finally {
+          sendBtn.disabled = false;
+          render();
+          inputEl.focus();
+        }
+      });
+
+      inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) composer.requestSubmit();
+      });
+    </script>
+  </body>
+</html>
