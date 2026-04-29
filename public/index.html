@@ -1522,8 +1522,9 @@ function renderDiff(before, after) {
 }
 
 function renderToolCard(t) {
-  const card = el('div', { class: 'tool', 'data-open': 'false', 'data-status': t.result?.exit_code > 0 ? 'error' : 'ok' });
-  const head = renderToolHead(t);
+  const status = t._running ? 'running' : (t.result?.exit_code > 0 ? 'error' : 'ok');
+  const card = el('div', { class: 'tool', 'data-open': 'false', 'data-status': status });
+  const head = renderToolHead(t, t._running ? 'running' : undefined);
   head.addEventListener('click', () => {
     card.dataset.open = card.dataset.open === 'true' ? 'false' : 'true';
   });
@@ -1920,6 +1921,14 @@ async function send() {
   const input = $('#input');
   const text = input.value.trim();
   if (!text || state.inflight) return;
+  if (text.startsWith('!')) {
+    const cmd = text.slice(1).trim();
+    if (!cmd) return;
+    input.value = '';
+    autosize();
+    await runLocalShell(cmd, text);
+    return;
+  }
   const userMsg = { role:'user', content:text, time: fmtTime() };
   state.messages.push(userMsg);
   state.tokens += Math.ceil(text.length / 4);
@@ -1989,6 +1998,52 @@ async function send() {
     state.inflight = null;
     $('#send').disabled = !$('#input').value.trim();
     renderMeter();
+    renderThread();
+  }
+}
+
+// `!<cmd>` quick shell — runs locally via /api/shell, bypasses the LLM.
+// Renders user input + a shell tool card so the result lives in the thread.
+async function runLocalShell(command, displayText) {
+  const userMsg = { role:'user', content: displayText, time: fmtTime() };
+  state.messages.push(userMsg);
+  const placeholder = {
+    role: 'assistant',
+    content: '',
+    time: fmtTime(),
+    tools: [{
+      id: 'local-' + Date.now().toString(36),
+      name: 'shell',
+      args: { command },
+      result: null,
+      ms: 0,
+      _running: true,
+    }],
+  };
+  state.messages.push(placeholder);
+  renderThread();
+  const t0 = Date.now();
+  try {
+    const res = await fetch('./api/shell', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command }),
+    });
+    const ms = Date.now() - t0;
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      placeholder.tools[0].result = { error: j.error || ('HTTP ' + res.status), ms };
+    } else {
+      const data = await res.json();
+      placeholder.tools[0].result = { ...data, ms };
+    }
+  } catch (err) {
+    placeholder.tools[0].result = {
+      error: err && err.message ? err.message : String(err),
+      ms: Date.now() - t0,
+    };
+  } finally {
+    placeholder.tools[0]._running = false;
     renderThread();
   }
 }

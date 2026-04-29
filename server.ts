@@ -582,6 +582,23 @@ Bun.serve({
       }
     }
 
+    if (url.pathname === "/api/shell" && req.method === "POST") {
+      try {
+        const body = (await req.json()) as { command?: string; cwd?: string; timeout_ms?: number };
+        if (!body.command || typeof body.command !== "string") {
+          return jsonError(400, "command (string) is required");
+        }
+        const result = await execShell({
+          command: body.command,
+          cwd: body.cwd,
+          timeout_ms: body.timeout_ms,
+        });
+        return Response.json(result, { headers: corsHeaders() });
+      } catch (err) {
+        return jsonError(500, err instanceof Error ? err.message : String(err));
+      }
+    }
+
     if (url.pathname === "/api/chat" && req.method === "POST") {
       const reqStart = Date.now();
       try {
