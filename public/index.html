@@ -2319,32 +2319,6 @@ function newChat() {
   $('#input').focus();
 }
 
-// ---------- demo seed: multi-turn explore → edit → run ----------
-function seedDemo() {
-  // Pre-baked transcript so the page lands on a meaningful state.
-  const t1 = MOCK.responder([{role:'user', content:'list files in /workspace/openclaw'}]);
-  const t2 = MOCK.responder([{role:'user', content:'show package.json'}]);
-  const t3 = MOCK.responder([{role:'user', content:'create hello.ts and run it'}]);
-  state.messages = [
-    { role:'user', content:'list files in /workspace/openclaw', time:'14:01' },
-    { role:'assistant', content: t1.reply, time:'14:01', tools: t1.toolEvents },
-    { role:'user', content:'show package.json and tell me which scripts I have', time:'14:02' },
-    { role:'assistant', content: t2.reply, time:'14:02', tools: t2.toolEvents },
-    { role:'user', content:'create hello.ts and run it', time:'14:03' },
-    { role:'assistant', content: t3.reply, time:'14:03', tools: t3.toolEvents },
-  ];
-  // Reflect filesystem touches in the rail
-  touched['/workspace/openclaw/package.json'] = 'r';
-  touched['/workspace/openclaw/hello.ts']     = 'w';
-  state.tokens = 4_200;
-  // Auto-expand the read_file in the second turn so a user landing on the
-  // demo sees what an expanded card looks like.
-  setTimeout(() => {
-    const cards = $$('.tool');
-    if (cards[2]) cards[2].dataset.open = 'true';
-  }, 150);
-}
-
 // ---------- init ----------
 async function init() {
   bindComposer();
@@ -2357,9 +2331,6 @@ async function init() {
   state.model = h.model || state.model;
   state.health = h.ok ? 'ready' : 'error';
   renderHeader();
-  // Allow ?empty=1 for the empty state
-  const params = new URLSearchParams(location.search);
-  if (!params.has('empty')) seedDemo();
   renderThread();
   fetchDir(ROOT);
   renderRail();
