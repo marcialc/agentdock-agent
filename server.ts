@@ -42,7 +42,16 @@ LAUNCHING WEB SERVERS:
 - Verify it's actually listening before claiming success: \`sleep 1 && curl -sf http://localhost:<port>/ >/dev/null && echo OK || tail -c 2000 /tmp/<name>.log\`.${
   PREVIEW_BASE
     ? `
-- Tell the user the preview URL: \`${PREVIEW_BASE}<port>/\`. AgentDock's path proxy reaches any port listening inside the container; the user opens that URL in their own browser to see the rendered UI.`
+- Tell the user the preview URL: \`${PREVIEW_BASE}<port>/\`. AgentDock's path proxy reaches any port listening inside the container; the user opens that URL in their own browser to see the rendered UI.
+
+PATH-PREFIX-AWARE FRAMEWORK FLAGS (REQUIRED for SPA dev servers behind the proxy):
+- The proxy serves the app at \`${PREVIEW_BASE}<port>/\`, but most frameworks emit absolute asset paths like \`/src/main.tsx\` and \`/@vite/client\`. Those resolve to the AgentDock origin root and 404, so the page loads blank. Configure the framework's base path to match:
+  - Vite (incl. React/Vue/Svelte/Solid templates): \`bun run dev -- --port <port> --host 0.0.0.0 --base ${PREVIEW_BASE}<port>/\`
+  - Astro: same \`--base\` flag.
+  - CRA: \`PUBLIC_URL=${PREVIEW_BASE}<port> bun run start\`.
+  - Next.js: edit \`next.config.{js,ts}\` and set \`basePath: '<path-portion-of-${PREVIEW_BASE}><port>'\` (no trailing slash), then \`bun run dev -- -p <port> -H 0.0.0.0\`.
+  - Plain static HTML / no build step: works without changes if the HTML uses relative URLs.
+- Diagnostic: if \`curl http://localhost:<port>/\` returns HTML containing \`src="/...\` or \`href="/...\` paths, the base flag is missing — the page will be blank for the user. Restart the server with the right flag.`
     : ""
 }
 - You cannot see rendered output yourself (no browser/screenshot tool). To validate, \`curl\` the URL and reason about the HTML/JSON, or hand the preview URL back to the user.`;
