@@ -167,7 +167,14 @@ async function execTool(name: string, args: Record<string, unknown>): Promise<un
   }
 }
 
-async function callModel(messages: ChatMessage[], model: string, round: number): Promise<ChatMessage> {
+interface ModelReply {
+  message: ChatMessage;
+  // Preserved before we null `content` for tool_calls — surface this to the
+  // UI as the model's reasoning between tool calls.
+  text: string;
+}
+
+async function callModel(messages: ChatMessage[], model: string, round: number): Promise<ModelReply> {
   if (!BASE_URL) {
     throw new Error("OPENAI_API_BASE_URL is not set in the sandbox env.");
   }
@@ -231,16 +238,33 @@ async function callModel(messages: ChatMessage[], model: string, round: number):
     log("callModel.missingMessage", { reqId, status: res.status, elapsedMs: elapsed, bodyPreview: text.slice(0, 2000) });
     throw new Error(`AI Gateway response missing choices[0].message: ${text.slice(0, 2000)}`);
   }
+  const originalText = extractText((message as { content?: unknown }).content);
   const normalized = normalizeAssistantMessage(message);
   log("callModel.response", {
     reqId,
     elapsedMs: elapsed,
     status: res.status,
     contentType: describeContent(normalized.content),
-    contentLen: typeof normalized.content === "string" ? normalized.content.length : 0,
+    textLen: originalText.length,
     toolCalls: (normalized.tool_calls ?? []).map((c) => ({ id: c.id, name: c.function?.name })),
   });
-  return normalized;
+  return { message: normalized, text: originalText };
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((c) => {
+        if (typeof c === "string") return c;
+        if (c && typeof c === "object" && "text" in (c as Record<string, unknown>)) {
+          return String((c as { text: unknown }).text ?? "");
+        }
+        return "";
+      })
+      .join("");
+  }
+  return "";
 }
 
 function describeContent(c: unknown): string {
@@ -291,10 +315,25 @@ function normalizeAssistantMessage(raw: unknown): ChatMessage {
 interface RunResult {
   messages: ChatMessage[];
   finalText: string;
-  toolEvents: Array<{ name: string; args: unknown; result: unknown }>;
+  toolEvents: Array<{ name: string; args: unknown; result: unknown; ms?: number }>;
 }
 
-async function runAgent(userMessages: ChatMessage[], model: string): Promise<RunResult> {
+type AgentEvent =
+  | { type: "start"; model: string; maxRounds: number }
+  | { type: "round_start"; round: number }
+  | { type: "model_call"; round: number }
+  | { type: "model_text"; round: number; text: string }
+  | { type: "tool_start"; round: number; id: string; name: string; args: Record<string, unknown> }
+  | { type: "tool_done"; round: number; id: string; name: string; ms: number; result: unknown }
+  | { type: "max_rounds"; round: number }
+  | { type: "final"; reply: string; toolEvents: RunResult["toolEvents"]; messages: ChatMessage[] }
+  | { type: "error"; message: string; stack?: string };
+
+async function runAgent(
+  userMessages: ChatMessage[],
+  model: string,
+  onEvent?: (event: AgentEvent) => void,
+): Promise<RunResult> {
   const sanitized = userMessages.map(sanitizeIncomingMessage);
   const messages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...sanitized];
   const toolEvents: RunResult["toolEvents"] = [];
@@ -304,13 +343,20 @@ async function runAgent(userMessages: ChatMessage[], model: string): Promise<Run
     sanitizedRoles: sanitized.map((m) => m.role),
     sanitizedContentTypes: sanitized.map((m) => describeContent(m.content)),
   });
+  onEvent?.({ type: "start", model, maxRounds: MAX_TOOL_ROUNDS });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const reply = await callModel(messages, model, round);
+    onEvent?.({ type: "round_start", round });
+    onEvent?.({ type: "model_call", round });
+    const { message: reply, text: replyText } = await callModel(messages, model, round);
     messages.push(reply);
 
+    if (replyText.trim().length > 0) {
+      onEvent?.({ type: "model_text", round, text: replyText });
+    }
+
     if (!reply.tool_calls || reply.tool_calls.length === 0) {
-      const finalText = typeof reply.content === "string" ? reply.content : "";
+      const finalText = typeof reply.content === "string" ? reply.content : replyText;
       log("runAgent.done", { round, finalLen: finalText.length, toolEventCount: toolEvents.length });
       return { messages, finalText, toolEvents };
     }
@@ -329,16 +375,19 @@ async function runAgent(userMessages: ChatMessage[], model: string): Promise<Run
         parsed = {};
       }
       log("runAgent.tool.start", { round, id: call.id, name: call.function.name, args: previewArgs(parsed) });
+      onEvent?.({ type: "tool_start", round, id: call.id, name: call.function.name, args: parsed });
       const t0 = Date.now();
       const result = await execTool(call.function.name, parsed);
+      const ms = Date.now() - t0;
       log("runAgent.tool.done", {
         round,
         id: call.id,
         name: call.function.name,
-        elapsedMs: Date.now() - t0,
+        elapsedMs: ms,
         resultPreview: previewResult(result),
       });
-      toolEvents.push({ name: call.function.name, args: parsed, result });
+      onEvent?.({ type: "tool_done", round, id: call.id, name: call.function.name, ms, result });
+      toolEvents.push({ name: call.function.name, args: parsed, result, ms });
       messages.push({
         role: "tool",
         tool_call_id: call.id,
@@ -349,6 +398,7 @@ async function runAgent(userMessages: ChatMessage[], model: string): Promise<Run
   }
 
   log("runAgent.maxRounds", { rounds: MAX_TOOL_ROUNDS, toolEventCount: toolEvents.length });
+  onEvent?.({ type: "max_rounds", round: MAX_TOOL_ROUNDS });
   return {
     messages,
     finalText: "(stopped: max tool rounds reached)",
@@ -429,6 +479,69 @@ Bun.serve({
       });
     }
 
+    if (url.pathname === "/api/fs/list" && req.method === "GET") {
+      const path = url.searchParams.get("path") || "/workspace";
+      try {
+        const names = await readdir(path);
+        const detailed = await Promise.all(
+          names.map(async (name) => {
+            try {
+              const st = await stat(`${path}/${name}`);
+              return { name, isDir: st.isDirectory(), size: st.size };
+            } catch {
+              return { name, isDir: false, size: -1 };
+            }
+          }),
+        );
+        detailed.sort((a, b) => {
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+        return Response.json({ path, entries: detailed }, { headers: corsHeaders() });
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        const msg = e?.message || String(err);
+        if (e?.code === "ENOENT") return jsonError(404, msg);
+        if (e?.code === "EACCES" || e?.code === "ENOTDIR") return jsonError(400, msg);
+        return jsonError(500, msg);
+      }
+    }
+
+    if (url.pathname === "/api/fs/read" && req.method === "GET") {
+      const path = url.searchParams.get("path");
+      if (!path) return jsonError(400, "path query param is required");
+      try {
+        const st = await stat(path);
+        if (st.isDirectory()) return jsonError(400, "path is a directory");
+        const size = st.size;
+        const MAX_VIEWER_BYTES = 262_144; // 256 KB
+        const f = Bun.file(path);
+        const head = new Uint8Array(await f.slice(0, Math.min(size, 4096)).arrayBuffer());
+        let isBinary = false;
+        for (let i = 0; i < head.length; i++) {
+          if (head[i] === 0) { isBinary = true; break; }
+        }
+        if (isBinary) {
+          return Response.json({ path, size, binary: true, content: null }, { headers: corsHeaders() });
+        }
+        if (size > MAX_VIEWER_BYTES) {
+          const slice = await f.slice(0, MAX_VIEWER_BYTES).text();
+          return Response.json(
+            { path, size, truncated: true, content: slice },
+            { headers: corsHeaders() },
+          );
+        }
+        const content = await f.text();
+        return Response.json({ path, size, content }, { headers: corsHeaders() });
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        const msg = e?.message || String(err);
+        if (e?.code === "ENOENT") return jsonError(404, msg);
+        if (e?.code === "EACCES" || e?.code === "EISDIR") return jsonError(400, msg);
+        return jsonError(500, msg);
+      }
+    }
+
     if (url.pathname === "/api/chat" && req.method === "POST") {
       const reqStart = Date.now();
       try {
@@ -462,6 +575,71 @@ Bun.serve({
         log("chat.error", { elapsedMs: Date.now() - reqStart, message, stack });
         return jsonError(500, message);
       }
+    }
+
+    if (url.pathname === "/api/chat/stream" && req.method === "POST") {
+      const reqStart = Date.now();
+      let body: { messages?: ChatMessage[]; model?: string };
+      try {
+        body = (await req.json()) as { messages?: ChatMessage[]; model?: string };
+      } catch {
+        return jsonError(400, "request body must be valid JSON");
+      }
+      if (!Array.isArray(body.messages)) {
+        return jsonError(400, "messages must be an array");
+      }
+      const messages = body.messages;
+      const model = body.model || DEFAULT_MODEL;
+      log("chat.stream.request", {
+        msgCount: messages.length,
+        model,
+        lastUser: previewLastUser(messages),
+      });
+
+      const enc = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = (event: AgentEvent) => {
+            try {
+              controller.enqueue(enc.encode(JSON.stringify(event) + "\n"));
+            } catch (err) {
+              log("chat.stream.enqueueError", {
+                message: err instanceof Error ? err.message : String(err),
+              });
+            }
+          };
+          try {
+            const result = await runAgent(messages, model, send);
+            send({
+              type: "final",
+              reply: result.finalText,
+              toolEvents: result.toolEvents,
+              messages: result.messages,
+            });
+            log("chat.stream.response", {
+              elapsedMs: Date.now() - reqStart,
+              finalLen: result.finalText.length,
+              toolEventCount: result.toolEvents.length,
+              finalMsgCount: result.messages.length,
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const stack = err instanceof Error ? err.stack : undefined;
+            log("chat.stream.error", { elapsedMs: Date.now() - reqStart, message, stack });
+            send({ type: "error", message, stack });
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "cache-control": "no-store, no-transform",
+          "x-accel-buffering": "no",
+          ...corsHeaders(),
+        },
+      });
     }
 
     return new Response("not found", { status: 404 });

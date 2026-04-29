@@ -659,6 +659,18 @@
     color: var(--text-faint); font-family: var(--mono); font-size: 11px;
     padding-bottom: 6px; border-bottom: 1px dashed var(--line-soft); margin-bottom: 6px;
   }
+  .live-text {
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 6px 0 8px;
+    padding: 8px 10px;
+    border-left: 2px solid var(--accent-line);
+    background: var(--bg-2);
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 
   /* Error banner */
   .banner {
@@ -775,6 +787,80 @@
   .tweak .switch[data-on="true"] { background: var(--accent-soft); border-color: var(--accent-line); }
   .tweak .switch[data-on="true"]::after { left: 17px; background: var(--accent); }
 
+  /* Main-area tabbar (Chat / Files) */
+  .tabbar {
+    display: flex; align-items: center; gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--bg-1);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    flex-shrink: 0;
+  }
+  .tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    max-width: 280px;
+  }
+  .tab:hover { color: var(--text); background: var(--bg-2); }
+  .tab[data-active="true"] {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: var(--text);
+  }
+  .tab .tab-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tab-close {
+    background: transparent; border: 0; color: var(--text-faint);
+    cursor: pointer; padding: 0 2px; line-height: 1;
+    font-size: 14px;
+  }
+  .tab-close:hover { color: var(--text); }
+  .tab[hidden] { display: none; }
+
+  /* File viewer (replaces chat in main area when active) */
+  .fileview {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg);
+    min-height: 0;
+  }
+  .fileview-banner {
+    padding: 6px 14px;
+    background: oklch(0.78 0.13 70 / 0.12);
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--warn);
+    font-family: var(--mono);
+    font-size: 11.5px;
+  }
+  .fileview-empty {
+    padding: 24px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  .fileview-error {
+    padding: 24px;
+    color: var(--err);
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  .fileview pre.code { margin: 0; border-radius: 0; }
+  .main[data-tab="chat"] .fileview { display: none; }
+  .main[data-tab="file"] .scroll { display: none; }
+  .main[data-tab="file"] .composer-wrap { display: none; }
+  .tree-node.tree-file { cursor: pointer; }
+  .tree-node.tree-loading { color: var(--text-faint); font-style: italic; cursor: default; }
+  .tree-node.tree-loading:hover { background: transparent; color: var(--text-faint); }
+  .tree-node.tree-error { color: var(--err); cursor: default; }
+
   .fab {
     position: fixed;
     right: 16px; bottom: 24px;
@@ -869,10 +955,22 @@
   </aside>
 
   <!-- ─── MAIN ─── -->
-  <main class="main">
+  <main class="main" id="main" data-tab="chat">
+    <div class="tabbar" id="tabbar">
+      <button class="tab" data-tab="chat" data-active="true" id="tab-chat">
+        <span class="tab-name">Chat</span>
+      </button>
+      <button class="tab" data-tab="file" id="tab-file" hidden>
+        <span class="tab-name" id="tab-file-name">file</span>
+        <span class="tab-close" id="tab-file-close" title="Close">×</span>
+      </button>
+    </div>
     <div class="scroll" id="scroll">
       <div class="scroll-inner" id="thread"></div>
     </div>
+    <section class="fileview" id="fileview">
+      <div class="fileview-body" id="fileview-body"></div>
+    </section>
 
     <div class="composer-wrap">
       <div class="composer">
@@ -1362,7 +1460,7 @@ function renderAssistantTurn(m) {
 }
 
 function renderLive(turn) {
-  // turn = { rounds, currentRound, tools: [{name, args, status, ms?}], thinking }
+  // turn = { rounds, currentRound, events:[{kind, ...}], thinking }
   const wrap = el('div', { class: 'turn full' });
   wrap.append(el('div', { class: 'role' },
     el('span', { class: 'who' }, 'agent'),
@@ -1373,15 +1471,32 @@ function renderLive(turn) {
     )
   ));
   const live = el('div', { class: 'live' });
-  live.append(el('div', { class: 'live-round' }, `round ${turn.currentRound} of ${turn.rounds}`));
-  for (const t of turn.tools) {
-    live.append(el('div', { class: 'live-row', 'data-state': t.status },
-      el('span', { class: 'dot' }),
-      el('span', { class: 'name' }, t.name),
-      el('span', { class: 'summ' }, summarize(t.name, t.args)),
-      el('span', { class: 't' }, t.status === 'done' ? `✓ ${t.ms ?? '—'} ms` : t.status === 'running' ? '…' : '')
-    ));
+  // header: current round + cumulative tool count
+  const toolCount = (turn.events||[]).filter(e => e.kind === 'tool').length;
+  const doneCount = (turn.events||[]).filter(e => e.kind === 'tool' && e.status === 'done').length;
+  const headerBits = [`round ${Math.max(turn.currentRound, 1)} of ${turn.rounds}`];
+  if (toolCount > 0) headerBits.push(`${doneCount}/${toolCount} tools`);
+  if (turn.startedAt) headerBits.push(`${Math.round((Date.now() - turn.startedAt)/1000)}s`);
+  live.append(el('div', { class: 'live-round' }, headerBits.join(' · ')));
+
+  for (const ev of (turn.events || [])) {
+    if (ev.kind === 'round') {
+      if (ev.round === 0) continue; // first round header is implicit in the live-round line
+      live.append(el('div', { class: 'live-round' }, `round ${ev.round + 1}`));
+      continue;
+    }
+    if (ev.kind === 'text') {
+      const txt = (ev.text || '').trim();
+      if (!txt) continue;
+      live.append(el('div', { class: 'live-text' }, txt));
+      continue;
+    }
+    if (ev.kind === 'tool') {
+      live.append(renderLiveTool(ev));
+      continue;
+    }
   }
+
   if (turn.thinking) {
     live.append(el('div', { class: 'live-thinking' },
       el('span', { class: 'dot', style: 'width:7px;height:7px;border-radius:50%;background:var(--accent);animation:softPulse 1.4s ease-in-out infinite;display:inline-block' }),
@@ -1390,6 +1505,37 @@ function renderLive(turn) {
   }
   wrap.append(live);
   return wrap;
+}
+
+function renderLiveTool(ev) {
+  // Reuse the rich tool card so users can expand to see args + result while
+  // the run is still in flight. ev.result is undefined while status==='running'.
+  const status = ev.status === 'running' ? 'running' : (ev.result?.exit_code > 0 ? 'error' : 'ok');
+  const card = el('div', { class: 'tool', 'data-open': ev.status === 'done' ? 'false' : 'false', 'data-status': status });
+  const head = renderToolHead(
+    { name: ev.name, args: ev.args, result: ev.status === 'done' ? ev.result : undefined },
+    ev.status === 'running' ? 'running' : undefined
+  );
+  head.addEventListener('click', () => {
+    card.dataset.open = card.dataset.open === 'true' ? 'false' : 'true';
+  });
+  card.append(head);
+  if (ev.status === 'done') {
+    card.append(renderToolBody({ name: ev.name, args: ev.args, result: ev.result }));
+  } else {
+    // running — show args only so the user can see what was sent
+    const body = el('div', { class: 'tool-body' });
+    body.append(el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, 'args'),
+      el('pre', { class: 'code' }, JSON.stringify(ev.args || {}, null, 2))
+    ));
+    body.append(el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, 'status'),
+      el('div', { class: 'meta-row' }, el('span', {}, 'running…'))
+    ));
+    card.append(body);
+  }
+  return card;
 }
 
 function copyText(e, txt) {
@@ -1418,64 +1564,157 @@ function renderThread() {
 }
 
 // ---------- workspace rail ----------
-const FS = {
-  '/workspace': { type:'dir', children: ['openclaw', 'scratch', 'hello.ts'] },
-  '/workspace/openclaw': { type:'dir', children: ['src', 'package.json', 'README.md', 'tsconfig.json', '.gitignore'] },
-  '/workspace/openclaw/src': { type:'dir', children: ['main.tsx', 'App.tsx', 'styles.css'] },
-  '/workspace/scratch': { type:'dir', children: ['notes.md'] },
-};
-const open = new Set(['/workspace', '/workspace/openclaw']);
+const ROOT = '/workspace';
+const fsCache = new Map();   // abs path -> { entries: [{name,isDir,size}] } | { error: string }
+const loading = new Set();   // abs paths currently being fetched
+const open = new Set([ROOT]);
 const touched = {}; // path -> 'r' | 'w'
+
+async function fetchDir(path) {
+  if (fsCache.has(path) || loading.has(path)) return;
+  loading.add(path);
+  try {
+    const res = await fetch('/api/fs/list?path=' + encodeURIComponent(path));
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      fsCache.set(path, { error: j.error || ('HTTP ' + res.status) });
+    } else {
+      const data = await res.json();
+      fsCache.set(path, { entries: Array.isArray(data.entries) ? data.entries : [] });
+    }
+  } catch (err) {
+    fsCache.set(path, { error: err && err.message ? err.message : String(err) });
+  } finally {
+    loading.delete(path);
+    renderRail();
+  }
+}
 
 function renderRail() {
   const body = $('#rail-body');
   body.innerHTML = '';
-  body.append(renderTreeNode('/workspace'));
+  body.append(renderTreeNode(ROOT, true));
   // touched-this-turn
   const t = Object.entries(touched);
   if (t.length) {
     body.append(el('div', { class: 'tree-section' }, 'touched this turn'));
     const wrap = el('div', { class: 'tree' });
     for (const [path, kind] of t) {
-      wrap.append(el('div', { class: 'tree-node', 'data-touch': kind },
+      wrap.append(el('div', { class: 'tree-node tree-file', 'data-touch': kind, onclick: () => openFile(path) },
         el('span', { class: 'tree-caret' }, ''),
         el('span', { class: 'tree-icon' }, kind==='w'?'◆':'●'),
-        el('span', { class: 'tree-name' }, path.replace('/workspace/', ''))
+        el('span', { class: 'tree-name' }, path.replace(ROOT + '/', ''))
       ));
     }
     body.append(wrap);
   }
 }
-function renderTreeNode(path) {
-  const node = FS[path];
+
+function renderTreeNode(path, isDir) {
   const name = path.split('/').pop() || path;
-  if (!node || node.type === 'file') {
-    return el('div', { class: 'tree-node', 'data-touch': touched[path]||'' },
+
+  if (!isDir) {
+    return el('div', { class: 'tree-node tree-file', 'data-touch': touched[path]||'', onclick: () => openFile(path) },
       el('span', { class: 'tree-caret' }, ''),
       el('span', { class: 'tree-icon' }, '·'),
       el('span', { class: 'tree-name' }, name || path)
     );
   }
+
   const opened = open.has(path);
   const wrap = el('div', {});
   const head = el('div', { class: 'tree-node', onclick: () => {
-    if (opened) open.delete(path); else open.add(path);
+    if (opened) open.delete(path); else { open.add(path); if (!fsCache.has(path)) fetchDir(path); }
     renderRail();
   }},
     el('span', { class: 'tree-caret' }, opened ? '▾' : '▸'),
     el('span', { class: 'tree-icon' }, '▣'),
-    el('span', { class: 'tree-name' }, (name||'workspace') + '/')
+    el('span', { class: 'tree-name' }, (path === ROOT ? (name || 'workspace') : name) + '/')
   );
   wrap.append(head);
+
   if (opened) {
     const kids = el('div', { class: 'tree-children' });
-    for (const c of node.children) {
-      const child = path === '/' ? `/${c}` : `${path}/${c}`;
-      kids.append(renderTreeNode(child));
+    if (!fsCache.has(path)) {
+      if (!loading.has(path)) fetchDir(path);
+      kids.append(el('div', { class: 'tree-node tree-loading' },
+        el('span', { class: 'tree-caret' }, ''),
+        el('span', { class: 'tree-icon' }, '·'),
+        el('span', { class: 'tree-name' }, 'loading…')
+      ));
+    } else {
+      const entry = fsCache.get(path);
+      if (entry.error) {
+        kids.append(el('div', { class: 'tree-node tree-error' },
+          el('span', { class: 'tree-caret' }, ''),
+          el('span', { class: 'tree-icon' }, '!'),
+          el('span', { class: 'tree-name' }, entry.error)
+        ));
+      } else {
+        for (const child of entry.entries) {
+          const childPath = path === '/' ? `/${child.name}` : `${path}/${child.name}`;
+          kids.append(renderTreeNode(childPath, !!child.isDir));
+        }
+        if (entry.entries.length === 0) {
+          kids.append(el('div', { class: 'tree-node tree-loading' },
+            el('span', { class: 'tree-caret' }, ''),
+            el('span', { class: 'tree-icon' }, '·'),
+            el('span', { class: 'tree-name' }, '(empty)')
+          ));
+        }
+      }
     }
     wrap.append(kids);
   }
   return wrap;
+}
+
+// ---------- file viewer ----------
+async function openFile(path) {
+  const tab = $('#tab-file');
+  const tabName = $('#tab-file-name');
+  const body = $('#fileview-body');
+  tab.hidden = false;
+  tabName.textContent = path.split('/').pop() || path;
+  tab.title = path;
+  setActiveTab('file');
+  body.innerHTML = '';
+  body.append(el('div', { class: 'fileview-empty' }, 'loading…'));
+  try {
+    const res = await fetch('/api/fs/read?path=' + encodeURIComponent(path));
+    body.innerHTML = '';
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      body.append(el('div', { class: 'fileview-error' }, `${res.status} — ${j.error || 'failed to read'}`));
+      return;
+    }
+    const data = await res.json();
+    if (data.binary) {
+      body.append(el('div', { class: 'fileview-empty' }, `Binary file (${fmtBytes(data.size||0)}) — preview unavailable`));
+      return;
+    }
+    if (data.truncated) {
+      body.append(el('div', { class: 'fileview-banner' },
+        `showing first ${fmtBytes(262144)} of ${fmtBytes(data.size||0)}`));
+    }
+    body.append(renderCodeBlock(data.content || '', guessLang(path)));
+  } catch (err) {
+    body.innerHTML = '';
+    body.append(el('div', { class: 'fileview-error' }, err && err.message ? err.message : String(err)));
+  }
+}
+
+function setActiveTab(which) {
+  $('#main').dataset.tab = which;
+  $('#tab-chat').dataset.active = (which === 'chat');
+  $('#tab-file').dataset.active = (which === 'file');
+}
+
+function closeFileTab() {
+  const tab = $('#tab-file');
+  tab.hidden = true;
+  $('#fileview-body').innerHTML = '';
+  setActiveTab('chat');
 }
 
 // ---------- send / turn lifecycle ----------
@@ -1489,41 +1728,63 @@ async function send() {
   input.value = '';
   autosize();
   $('#send').disabled = true;
-  // start inflight
-  state.inflight = { rounds: 12, currentRound: 1, tools: [], thinking: true };
+  // start inflight — populated by streaming events from /api/chat/stream
+  state.inflight = {
+    rounds: 12,
+    currentRound: 0,
+    events: [],          // chronological: {kind:'round'|'text'|'tool', ...}
+    toolsById: {},       // for fast tool_done lookup
+    thinking: true,
+    startedAt: Date.now(),
+    finalData: null
+  };
   renderThread();
 
+  let usedStream = false;
   try {
-    // Mock progressive tool-call animation: peek at the eventual response,
-    // animate each tool entry into the live ghost, then commit.
-    const peek = MOCK.responder(state.messages); // safe even when real backend is in use; we still animate from this
-    for (let i = 0; i < peek.toolEvents.length; i++) {
-      const t = peek.toolEvents[i];
-      state.inflight.tools.push({ name: t.name, args: t.args, status: 'running' });
-      renderThread();
-      await sleep(280 + Math.random()*350);
-      state.inflight.tools[i].status = 'done';
-      state.inflight.tools[i].ms = t.result?.ms ?? Math.floor(Math.random()*180)+20;
-      state.inflight.currentRound = Math.min(state.inflight.currentRound + 1, state.inflight.rounds);
-      // mark fs touch
-      if (t.name === 'read_file')  touched[t.args.path] = 'r';
-      if (t.name === 'write_file') touched[t.args.path] = 'w';
-      renderThread();
-      renderRail();
+    try {
+      await streamChat(state.messages, state.model, (event) => {
+        usedStream = true;
+        applyStreamEvent(event);
+        renderThread();
+        renderRail();
+      });
+    } catch (e) {
+      if (usedStream) throw e;
+      // streaming endpoint missing or unreachable — degrade to mocked animation
+      // so the static page still feels alive when served without a backend
+      const peek = MOCK.responder(state.messages);
+      const evts = state.inflight.events;
+      evts.push({ kind:'round', round: 0 });
+      for (let i = 0; i < peek.toolEvents.length; i++) {
+        const t = peek.toolEvents[i];
+        const tid = `mock-${i}`;
+        const entry = { kind:'tool', round: 0, id: tid, name: t.name, args: t.args, status: 'running' };
+        evts.push(entry);
+        state.inflight.toolsById[tid] = entry;
+        renderThread();
+        await sleep(280 + Math.random()*350);
+        entry.status = 'done';
+        entry.ms = t.result?.ms ?? Math.floor(Math.random()*180)+20;
+        entry.result = t.result;
+        if (t.name === 'read_file')  touched[t.args.path] = 'r';
+        if (t.name === 'write_file') touched[t.args.path] = 'w';
+        renderThread();
+        renderRail();
+      }
+      state.inflight.finalData = { reply: peek.reply, toolEvents: peek.toolEvents };
     }
-    state.inflight.thinking = true;
-    renderThread();
 
-    // real call (hits mock fallback if endpoint missing)
-    const data = await postChat(state.messages);
-    const assistantMsg = {
-      role: 'assistant',
-      content: data.reply,
-      time: fmtTime(),
-      tools: data.toolEvents || []
-    };
-    state.messages.push(assistantMsg);
-    state.tokens += Math.ceil((data.reply||'').length / 4);
+    const f = state.inflight.finalData;
+    if (f) {
+      state.messages.push({
+        role: 'assistant',
+        content: f.reply || '',
+        time: fmtTime(),
+        tools: f.toolEvents || []
+      });
+      state.tokens += Math.ceil((f.reply||'').length / 4);
+    }
   } catch (e) {
     showBanner(e.message || 'Request failed', e.payload);
   } finally {
@@ -1531,6 +1792,166 @@ async function send() {
     $('#send').disabled = !$('#input').value.trim();
     renderMeter();
     renderThread();
+  }
+}
+
+async function streamChat(messages, model, onEvent) {
+  let r;
+  try {
+    r = await fetch('./api/chat/stream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'accept': 'application/x-ndjson' },
+      body: JSON.stringify({ messages, model })
+    });
+  } catch (e) {
+    // network-level failure — let caller fall back to mock
+    throw Object.assign(new Error(e.message || 'network error'), { network: true });
+  }
+  if (!r.ok) {
+    const text = await r.text().catch(()=>'(no body)');
+    throw Object.assign(new Error(`${r.status} ${r.statusText}`), { payload: text });
+  }
+  if (!r.body) {
+    throw new Error('streaming response has no body');
+  }
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      let event;
+      try { event = JSON.parse(line); } catch { continue; }
+      onEvent(event);
+    }
+  }
+  const tail = buf.trim();
+  if (tail) {
+    try { onEvent(JSON.parse(tail)); } catch {}
+  }
+}
+
+// Adapt the agent's tool return shapes to what the rich tool cards expect.
+// The agent returns `{entries:[{name,isDir,size}]}`, `{content}`, `{ok,bytes}`;
+// the renderers were originally written against the mock fixture shapes
+// (`type`/`mtime`, `contents`/`size`, `before`/`after`/`size`).
+function normalizeToolResult(name, args, result, ms) {
+  if (!result || typeof result !== 'object') return { _raw: result, ms };
+  if (name === 'shell') {
+    return { ...result, ms };
+  }
+  if (name === 'list_files' && Array.isArray(result.entries)) {
+    return {
+      entries: result.entries.map(e => ({
+        name: e.name,
+        type: e.isDir ? 'dir' : 'file',
+        size: typeof e.size === 'number' ? e.size : 0,
+        mtime: e.mtime || ''
+      })),
+      ms
+    };
+  }
+  if (name === 'read_file' && typeof result.content === 'string') {
+    return {
+      contents: result.content,
+      size: result.content.length,
+      lang: guessLang(args?.path),
+      ms
+    };
+  }
+  if (name === 'write_file') {
+    return {
+      after: typeof args?.content === 'string' ? args.content : '',
+      before: '',
+      size: typeof result.bytes === 'number' ? result.bytes : 0,
+      lang: guessLang(args?.path),
+      ms
+    };
+  }
+  return { ...result, ms };
+}
+
+function guessLang(path) {
+  if (!path || typeof path !== 'string') return 'plaintext';
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const map = {
+    ts:'typescript', tsx:'typescript', js:'javascript', jsx:'javascript',
+    json:'json', md:'markdown', html:'xml', css:'css', sh:'bash',
+    py:'python', go:'go', rs:'rust', yml:'yaml', yaml:'yaml', toml:'ini',
+    txt:'plaintext'
+  };
+  return map[ext] || 'plaintext';
+}
+
+function applyStreamEvent(event) {
+  const turn = state.inflight;
+  if (!turn) return;
+  switch (event.type) {
+    case 'start':
+      if (event.maxRounds) turn.rounds = event.maxRounds;
+      break;
+    case 'round_start':
+      turn.currentRound = (event.round | 0) + 1;
+      turn.events.push({ kind: 'round', round: event.round | 0 });
+      turn.thinking = false;
+      break;
+    case 'model_call':
+      turn.thinking = true;
+      break;
+    case 'model_text':
+      turn.thinking = false;
+      turn.events.push({ kind: 'text', round: event.round | 0, text: event.text || '' });
+      break;
+    case 'tool_start': {
+      turn.thinking = false;
+      const entry = {
+        kind: 'tool',
+        round: event.round | 0,
+        id: event.id,
+        name: event.name,
+        args: event.args || {},
+        status: 'running',
+        startedAt: Date.now()
+      };
+      turn.events.push(entry);
+      turn.toolsById[event.id] = entry;
+      break;
+    }
+    case 'tool_done': {
+      const entry = turn.toolsById[event.id];
+      if (entry) {
+        entry.status = 'done';
+        entry.ms = event.ms;
+        entry.result = normalizeToolResult(entry.name, entry.args, event.result, event.ms);
+        if (entry.name === 'read_file' && entry.args?.path) touched[entry.args.path] = 'r';
+        if (entry.name === 'write_file' && entry.args?.path) touched[entry.args.path] = 'w';
+      }
+      turn.thinking = true; // waiting for next model call
+      break;
+    }
+    case 'max_rounds':
+      turn.thinking = false;
+      break;
+    case 'final':
+      turn.thinking = false;
+      turn.finalData = {
+        reply: event.reply || '',
+        toolEvents: (event.toolEvents || []).map(t => ({
+          name: t.name,
+          args: t.args,
+          ms: t.ms,
+          result: normalizeToolResult(t.name, t.args, t.result, t.ms)
+        }))
+      };
+      break;
+    case 'error':
+      throw Object.assign(new Error(event.message || 'agent error'), { payload: event.stack });
   }
 }
 
@@ -1640,8 +2061,29 @@ function bindShortcuts() {
       e.preventDefault();
       newChat();
     }
+    if (e.key === 'Escape' && $('#main').dataset.tab === 'file' && document.activeElement !== $('#input')) {
+      closeFileTab();
+    }
   });
   $('#new-chat').addEventListener('click', newChat);
+}
+
+function bindTabbar() {
+  $('#tab-chat').addEventListener('click', () => setActiveTab('chat'));
+  $('#tab-file').addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'tab-file-close') return;
+    setActiveTab('file');
+  });
+  $('#tab-file-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeFileTab();
+  });
+  $('#rail-refresh').addEventListener('click', () => {
+    fsCache.clear();
+    loading.clear();
+    fetchDir(ROOT);
+    renderRail();
+  });
 }
 function newChat() {
   state.messages = [];
@@ -1686,6 +2128,7 @@ async function init() {
   bindTheme();
   bindShortcuts();
   bindTweaks();
+  bindTabbar();
   // Health
   const h = await fetchHealth();
   state.model = h.model || state.model;
@@ -1695,6 +2138,7 @@ async function init() {
   const params = new URLSearchParams(location.search);
   if (!params.has('empty')) seedDemo();
   renderThread();
+  fetchDir(ROOT);
   renderRail();
   renderMeter();
 }
