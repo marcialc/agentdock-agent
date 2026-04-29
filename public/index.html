@@ -1574,7 +1574,7 @@ async function fetchDir(path) {
   if (fsCache.has(path) || loading.has(path)) return;
   loading.add(path);
   try {
-    const res = await fetch('/api/fs/list?path=' + encodeURIComponent(path));
+    const res = await fetch('./api/fs/list?path=' + encodeURIComponent(path));
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       fsCache.set(path, { error: j.error || ('HTTP ' + res.status) });
@@ -1681,7 +1681,7 @@ async function openFile(path) {
   body.innerHTML = '';
   body.append(el('div', { class: 'fileview-empty' }, 'loading…'));
   try {
-    const res = await fetch('/api/fs/read?path=' + encodeURIComponent(path));
+    const res = await fetch('./api/fs/read?path=' + encodeURIComponent(path));
     body.innerHTML = '';
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
