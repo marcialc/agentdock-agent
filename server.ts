@@ -45,13 +45,15 @@ LAUNCHING WEB SERVERS:
 - Tell the user the preview URL: \`${PREVIEW_BASE}<port>/\`. AgentDock's path proxy reaches any port listening inside the container; the user opens that URL in their own browser to see the rendered UI.
 
 PATH-PREFIX-AWARE FRAMEWORK FLAGS (REQUIRED for SPA dev servers behind the proxy):
-- The proxy serves the app at \`${PREVIEW_BASE}<port>/\`, but most frameworks emit absolute asset paths like \`/src/main.tsx\` and \`/@vite/client\`. Those resolve to the AgentDock origin root and 404, so the page loads blank. Configure the framework's base path to match:
-  - Vite (incl. React/Vue/Svelte/Solid templates): \`bun run dev -- --port <port> --host 0.0.0.0 --base ${PREVIEW_BASE}<port>/\`
-  - Astro: same \`--base\` flag.
-  - CRA: \`PUBLIC_URL=${PREVIEW_BASE}<port> bun run start\`.
+- The proxy serves the app at \`${PREVIEW_BASE}<port>/\` and STRIPS the \`/__sbx/<sandbox-id>/<port>\` prefix before forwarding to \`localhost:<port>\`. Most frameworks emit absolute asset paths like \`/src/main.tsx\`. Those resolve to the AgentDock origin root (no prefix) and serve the wrong content — the page loads blank. Configure the framework so emitted URLs include the prefix:
+  - **Vite (RECOMMENDED for SPAs): use the production preview, not dev.** Vite dev silently ignores \`--base\` when it's a full URL, so HMR mode emits root-absolute paths and breaks behind the proxy. Run instead:
+    \`cd /workspace/<app> && bun run build && bun run preview -- --host 0.0.0.0 --port <port> --base ${PREVIEW_BASE}<port>/ >/tmp/<app>.log 2>&1 &\`
+    Trade-off: no HMR, but the page actually renders. If the user explicitly wants HMR, edit \`vite.config.ts\` to set \`base: './'\` and run \`bun run dev -- --port <port> --host 0.0.0.0\` — warn them HMR-over-proxy is brittle.
+  - Astro: same \`bun run build && bun run preview --base ${PREVIEW_BASE}<port>/\` pattern.
+  - CRA: \`PUBLIC_URL=${PREVIEW_BASE}<port> bun run build && bunx serve -s build -l <port>\`.
   - Next.js: edit \`next.config.{js,ts}\` and set \`basePath: '<path-portion-of-${PREVIEW_BASE}><port>'\` (no trailing slash), then \`bun run dev -- -p <port> -H 0.0.0.0\`.
   - Plain static HTML / no build step: works without changes if the HTML uses relative URLs.
-- Diagnostic: if \`curl http://localhost:<port>/\` returns HTML containing \`src="/...\` or \`href="/...\` paths, the base flag is missing — the page will be blank for the user. Restart the server with the right flag.`
+- Diagnostic: \`curl -s http://localhost:<port>/ | grep -E 'src="/|href="/'\`. Any hit means absolute paths leaked through and the page will be blank. Switch to the production-preview pattern above.`
     : ""
 }
 - You cannot see rendered output yourself (no browser/screenshot tool). To validate, \`curl\` the URL and reason about the HTML/JSON, or hand the preview URL back to the user.`;
