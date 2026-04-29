@@ -891,9 +891,62 @@
     font-size: 12.5px;
   }
   .fileview pre.code { margin: 0; border-radius: 0; }
-  .main[data-tab="chat"] .fileview { display: none; }
-  .main[data-tab="file"] .scroll { display: none; }
-  .main[data-tab="file"] .composer-wrap { display: none; }
+
+  /* URL preview pane (live iframe of an HTTP url) */
+  .urlview {
+    flex: 1;
+    min-height: 0;
+    display: none;
+    flex-direction: column;
+    background: var(--bg);
+  }
+  .urlview-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--bg-1);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .urlview-url {
+    flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text);
+  }
+  .urlview-open, .urlview-reload {
+    background: transparent; color: var(--text-faint);
+    border: 1px solid transparent;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 12px; cursor: pointer;
+    font-family: var(--mono);
+  }
+  .urlview-open:hover, .urlview-reload:hover {
+    color: var(--text); background: var(--bg-2); border-color: var(--line);
+  }
+  #urlview-iframe {
+    flex: 1; width: 100%;
+    border: 0; background: #fff; display: block;
+  }
+
+  /* tab-data show/hide rules */
+  .main[data-tab="chat"] .fileview,
+  .main[data-tab="chat"] .urlview { display: none; }
+  .main[data-tab="file"] .scroll,
+  .main[data-tab="file"] .composer-wrap,
+  .main[data-tab="file"] .urlview { display: none; }
+  .main[data-tab="preview"] .scroll,
+  .main[data-tab="preview"] .composer-wrap,
+  .main[data-tab="preview"] .fileview { display: none; }
+  .main[data-tab="preview"] .urlview { display: flex; }
+
+  /* clickable URL hint inside chat prose */
+  .prose a.preview-link::after {
+    content: " ⤴";
+    color: var(--text-faint);
+    font-size: 0.85em;
+  }
   .tree-node.tree-file { cursor: pointer; }
   .tree-node.tree-loading { color: var(--text-faint); font-style: italic; cursor: default; }
   .tree-node.tree-loading:hover { background: transparent; color: var(--text-faint); }
@@ -1002,6 +1055,10 @@
         <span class="tab-name" id="tab-file-name">file</span>
         <span class="tab-close" id="tab-file-close" title="Close">×</span>
       </button>
+      <button class="tab" data-tab="preview" id="tab-preview" hidden>
+        <span class="tab-name" id="tab-preview-name">preview</span>
+        <span class="tab-close" id="tab-preview-close" title="Close">×</span>
+      </button>
     </div>
     <div class="scroll" id="scroll">
       <div class="scroll-inner" id="thread"></div>
@@ -1012,6 +1069,14 @@
         <button class="fileview-mode" data-mode="source"  id="fileview-mode-source">source</button>
       </div>
       <div class="fileview-body" id="fileview-body"></div>
+    </section>
+    <section class="urlview" id="urlview">
+      <div class="urlview-bar" id="urlview-bar">
+        <span class="urlview-url" id="urlview-url"></span>
+        <button class="urlview-open" id="urlview-open" title="Open in new browser tab">↗</button>
+        <button class="urlview-reload" id="urlview-reload" title="Reload">↻</button>
+      </div>
+      <iframe id="urlview-iframe" sandbox="allow-scripts allow-forms allow-popups allow-same-origin" referrerpolicy="no-referrer"></iframe>
     </section>
 
     <div class="composer-wrap">
@@ -1496,9 +1561,22 @@ function renderAssistantTurn(m) {
     m.tools.forEach(t => stack.append(renderToolCard(t)));
     wrap.append(stack);
   }
-  const prose = el('div', { class: 'prose', html: marked.parse(m.content || '') });
+  const prose = el('div', { class: 'prose', html: linkifyBareUrls(marked.parse(m.content || '')) });
+  prose.querySelectorAll('a[href^="http"]').forEach(a => a.classList.add('preview-link'));
   wrap.append(prose);
   return wrap;
+}
+
+// Wrap any bare http(s) URLs that marked left as plain text into anchor tags,
+// while leaving URLs that are already inside <a> or <code> alone.
+function linkifyBareUrls(html) {
+  const urlRe = /https?:\/\/[^\s<>"')]+/g;
+  return html.replace(/(<a\b[^>]*>[\s\S]*?<\/a>|<code\b[^>]*>[\s\S]*?<\/code>)|(https?:\/\/[^\s<>"')]+)/g,
+    (m, skip, url) => {
+      if (skip) return skip;
+      const safe = url.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      return `<a href="${safe}" rel="noreferrer">${safe}</a>`;
+    });
 }
 
 function renderLive(turn) {
@@ -1792,13 +1870,49 @@ function setActiveTab(which) {
   $('#main').dataset.tab = which;
   $('#tab-chat').dataset.active = (which === 'chat');
   $('#tab-file').dataset.active = (which === 'file');
+  $('#tab-preview').dataset.active = (which === 'preview');
 }
 
 function closeFileTab() {
   const tab = $('#tab-file');
   tab.hidden = true;
   $('#fileview-body').innerHTML = '';
-  setActiveTab('chat');
+  setActiveTab($('#tab-preview').hidden ? 'chat' : 'preview');
+}
+
+// ---------- URL preview tab ----------
+const previewState = { url: null };
+
+function urlLabel(url) {
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/\/(\d{2,5})\/?$/);
+    if (m) return ':' + m[1];
+    return u.host + (u.pathname === '/' ? '' : u.pathname);
+  } catch { return url; }
+}
+
+function openPreview(url) {
+  previewState.url = url;
+  const tab = $('#tab-preview');
+  tab.hidden = false;
+  tab.title = url;
+  $('#tab-preview-name').textContent = urlLabel(url);
+  $('#urlview-url').textContent = url;
+  $('#urlview-iframe').src = url;
+  setActiveTab('preview');
+}
+
+function closePreviewTab() {
+  $('#tab-preview').hidden = true;
+  $('#urlview-iframe').src = 'about:blank';
+  previewState.url = null;
+  setActiveTab($('#tab-file').hidden ? 'chat' : 'file');
+}
+
+function reloadPreview() {
+  const f = $('#urlview-iframe');
+  if (previewState.url) f.src = previewState.url;
 }
 
 // ---------- send / turn lifecycle ----------
@@ -2162,6 +2276,18 @@ function bindTabbar() {
     e.stopPropagation();
     closeFileTab();
   });
+  $('#tab-preview').addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'tab-preview-close') return;
+    setActiveTab('preview');
+  });
+  $('#tab-preview-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    closePreviewTab();
+  });
+  $('#urlview-open').addEventListener('click', () => {
+    if (previewState.url) window.open(previewState.url, '_blank', 'noopener,noreferrer');
+  });
+  $('#urlview-reload').addEventListener('click', reloadPreview);
   $('#rail-refresh').addEventListener('click', () => {
     fsCache.clear();
     loading.clear();
@@ -2170,6 +2296,17 @@ function bindTabbar() {
   });
   $('#fileview-mode-preview').addEventListener('click', () => setFileViewMode('preview'));
   $('#fileview-mode-source').addEventListener('click', () => setFileViewMode('source'));
+  // Click-delegate: links in chat replies open in the in-app preview tab.
+  // Cmd/Ctrl/middle-click falls through to the browser (real new tab).
+  $('#thread').addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href]');
+    if (!a) return;
+    const href = a.getAttribute('href') || '';
+    if (!/^https?:\/\//i.test(href)) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+    e.preventDefault();
+    openPreview(href);
+  });
 }
 function newChat() {
   state.messages = [];
