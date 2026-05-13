@@ -21,6 +21,12 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css" />
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 
+<!-- CodeMirror 5 — editable file viewer -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/meta.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/mode/loadmode.min.js"></script>
+
 <style>
   /* ============================================================
      Agent Dock — design tokens + shell
@@ -1236,6 +1242,16 @@
   .fileview-mode[data-active="true"] {
     color: var(--text); background: var(--bg-2); border-color: var(--line);
   }
+  .fileview-save {
+    margin-left: auto;
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--line));
+    background: var(--accent-soft);
+  }
+  .fileview-save:hover {
+    background: color-mix(in oklch, var(--accent) 28%, var(--bg-1));
+    color: var(--text);
+  }
   .fileview-body {
     flex: 1; min-height: 0;
     padding: 14px;
@@ -1475,6 +1491,58 @@
   .hljs-tag, .hljs-name, .hljs-selector-tag { color: oklch(0.78 0.16 290); }
   .hljs-meta, .hljs-symbol { color: var(--text-dim); }
 
+  /* ===== CodeMirror — cm-s-agentdock theme (cascades from our CSS vars) ===== */
+  .cm-s-agentdock.CodeMirror {
+    background: var(--bg);
+    color: var(--text);
+    font: 500 12px/1.55 var(--mono);
+    height: 100%;
+  }
+  .cm-s-agentdock .CodeMirror-scroll {
+    background: var(--bg);
+  }
+  .cm-s-agentdock .CodeMirror-gutters {
+    background: var(--bg-1);
+    border-right: 1px solid var(--line-soft);
+  }
+  .cm-s-agentdock .CodeMirror-linenumber { color: var(--text-faint); padding: 0 8px 0 4px; }
+  .cm-s-agentdock .CodeMirror-cursor { border-left: 1.5px solid var(--accent); }
+  .cm-s-agentdock .CodeMirror-selected { background: var(--bg-2); }
+  .cm-s-agentdock.CodeMirror-focused .CodeMirror-selected,
+  .cm-s-agentdock .CodeMirror-line::selection,
+  .cm-s-agentdock .CodeMirror-line ::selection {
+    background: color-mix(in oklch, var(--accent) 25%, var(--bg-2));
+  }
+  .cm-s-agentdock .CodeMirror-activeline-background { background: var(--bg-1); }
+  .cm-s-agentdock .CodeMirror-matchingbracket {
+    color: var(--accent) !important;
+    border-bottom: 1px solid var(--accent);
+  }
+  .cm-s-agentdock .cm-keyword,
+  .cm-s-agentdock .cm-tag,
+  .cm-s-agentdock .cm-builtin     { color: oklch(0.78 0.16 290); }
+  .cm-s-agentdock .cm-string,
+  .cm-s-agentdock .cm-string-2,
+  .cm-s-agentdock .cm-atom        { color: var(--accent); }
+  .cm-s-agentdock .cm-number,
+  .cm-s-agentdock .cm-attribute   { color: oklch(0.80 0.16 75); }
+  .cm-s-agentdock .cm-comment     { color: var(--text-faint); font-style: italic; }
+  .cm-s-agentdock .cm-def,
+  .cm-s-agentdock .cm-property,
+  .cm-s-agentdock .cm-variable-2,
+  .cm-s-agentdock .cm-variable-3  { color: oklch(0.80 0.13 220); }
+  .cm-s-agentdock .cm-variable    { color: var(--text); }
+  .cm-s-agentdock .cm-operator    { color: var(--text-dim); }
+  .cm-s-agentdock .cm-meta        { color: var(--text-dim); }
+  .cm-s-agentdock .cm-error       { color: var(--error); }
+
+  /* The mounted editor fills the file viewer body that we made scroll-bounded. */
+  .fileview-body .CodeMirror {
+    height: 100%;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-sm);
+  }
+
 </style>
 </head>
 <body>
@@ -1562,6 +1630,7 @@
       <div class="fileview-modes" id="fileview-modes">
         <button class="fileview-mode" data-mode="preview" id="fileview-mode-preview">preview</button>
         <button class="fileview-mode" data-mode="source"  id="fileview-mode-source">source</button>
+        <button class="fileview-mode fileview-save" id="fileview-save" title="Save (⌘S)" hidden>save</button>
       </div>
       <div class="fileview-body" id="fileview-body"></div>
     </section>
@@ -1714,6 +1783,11 @@ const summarize = (name, args) => {
   if (name === 'web_extract') return args.url || '';
   return JSON.stringify(args);
 };
+
+// CodeMirror lazy-mode loader URL pattern.
+if (typeof CodeMirror !== 'undefined') {
+  CodeMirror.modeURL = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/%N/%N.min.js';
+}
 
 // marked + hljs
 marked.setOptions({
@@ -2677,6 +2751,7 @@ function renderTabbar() {
       label: name,
       title: t.path,
       active: isActive,
+      dirty: !!t.dirty,
       onActivate: () => { activeFilePath = t.path; setActiveTab('file'); renderFileView(); renderTabbar(); },
       onClose: () => closeFileTab(t.path),
     });
@@ -2709,18 +2784,19 @@ function renderTabbar() {
   requestAnimationFrame(() => positionTabPill(activeBtn));
 }
 
-function makeTabButton({ kind, icon, label, title, active, onActivate, onClose }) {
+function makeTabButton({ kind, icon, label, title, active, dirty, onActivate, onClose }) {
   const btn = el('button', {
-    class: 'tab' + (active ? ' is-active' : ''),
+    class: 'tab' + (active ? ' is-active' : '') + (dirty ? ' t-dirty' : ''),
     'data-kind': kind,
     type: 'button',
-    title: title || label,
+    title: (title || label) + (dirty ? ' · unsaved' : ''),
     onclick: (e) => {
       if (e.target.closest('.t-close')) return;
       onActivate && onActivate();
     },
   });
   btn.append(el('span', { class: 't-icon', html: icon }));
+  if (dirty) btn.append(el('span', { class: 't-dot' }));
   btn.append(el('span', { class: 't-label' }, label));
   btn.append(el('span', {
     class: 't-close',
@@ -2790,14 +2866,27 @@ function closeChatTab(id) {
 
 function renderFileView() {
   const body = $('#fileview-body');
+  // Detach (don't dispose) any prior editor mounts so we can re-attach them
+  // when re-rendering, which preserves cursor/scroll/dirty state.
+  for (const t of fileTabs) {
+    if (t.editor && t.editor.getWrapperElement().parentElement === body) {
+      body.removeChild(t.editor.getWrapperElement());
+    }
+  }
   body.innerHTML = '';
   const tab = activeFileTab();
   if (!tab) {
     $('#fileview-modes').dataset.show = 'false';
+    syncSaveButton();
     return;
   }
-  $('#fileview-modes').dataset.show = isHtmlPath(tab.path) ? 'true' : 'false';
+  // Always show the modes strip when a file is open (it hosts the Save
+  // button too). The preview/source toggle is only meaningful for HTML.
+  $('#fileview-modes').dataset.show = 'true';
+  $('#fileview-mode-preview').hidden = !isHtmlPath(tab.path);
+  $('#fileview-mode-source').hidden  = !isHtmlPath(tab.path);
   syncModeButtons();
+  syncSaveButton();
   if (tab.loading) {
     body.append(el('div', { class: 'fileview-empty' }, 'loading…'));
     return;
@@ -2824,7 +2913,80 @@ function renderFileView() {
     body.append(el('div', { class: 'fileview-banner' },
       `showing first ${fmtBytes(262144)} of ${fmtBytes(data.size||0)}`));
   }
-  body.append(renderCodeBlock(data.content || '', guessLang(path)));
+  mountEditor(tab, body);
+}
+
+function codeMirrorMode(path) {
+  if (!path) return 'text/plain';
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const map = {
+    ts: 'text/typescript', tsx: 'text/typescript-jsx',
+    js: 'text/javascript', jsx: 'text/jsx', mjs: 'text/javascript', cjs: 'text/javascript',
+    json: 'application/json',
+    html: 'htmlmixed', htm: 'htmlmixed', xml: 'xml', svg: 'xml',
+    css: 'css', scss: 'css', sass: 'css', less: 'css',
+    md: 'markdown', markdown: 'markdown',
+    py: 'python', go: 'go', rs: 'rust',
+    sh: 'shell', bash: 'shell', zsh: 'shell',
+    yml: 'yaml', yaml: 'yaml',
+    toml: 'toml', ini: 'toml',
+    sql: 'sql',
+    php: 'php', rb: 'ruby', java: 'text/x-java', c: 'text/x-csrc', cpp: 'text/x-c++src', cc: 'text/x-c++src',
+    txt: 'text/plain',
+  };
+  return map[ext] || 'text/plain';
+}
+
+function mountEditor(tab, host) {
+  // Re-attach an existing editor if we have one (preserves scroll/cursor/dirty).
+  if (tab.editor) {
+    host.append(tab.editor.getWrapperElement());
+    tab.editor.refresh();
+    return;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = tab.data.content || '';
+  host.append(ta);
+  const mode = codeMirrorMode(tab.path);
+  const cm = CodeMirror.fromTextArea(ta, {
+    mode,
+    theme: 'agentdock',
+    lineNumbers: true,
+    indentUnit: 2,
+    tabSize: 2,
+    indentWithTabs: false,
+    lineWrapping: false,
+    viewportMargin: 30,
+    matchBrackets: true,
+    autoCloseBrackets: false,
+    extraKeys: {
+      'Cmd-S':  (cmInst) => { saveActiveFile(); },
+      'Ctrl-S': (cmInst) => { saveActiveFile(); },
+    },
+  });
+  tab.editor = cm;
+  cm.on('change', () => {
+    const current = cm.getValue();
+    const original = (tab.data && typeof tab.data.content === 'string') ? tab.data.content : '';
+    const newDirty = current !== original;
+    if (newDirty !== !!tab.dirty) {
+      tab.dirty = newDirty;
+      renderTabbar();
+      syncSaveButton();
+    }
+  });
+  // Lazy-load the language grammar if it's not already loaded.
+  if (CodeMirror.modeURL && mode && mode !== 'text/plain') {
+    try { CodeMirror.autoLoadMode(cm, modeNameFor(mode)); } catch {}
+  }
+  // CodeMirror sometimes needs a refresh after being placed in a hidden parent.
+  requestAnimationFrame(() => cm.refresh());
+}
+
+function modeNameFor(mime) {
+  if (!CodeMirror.findModeByMIME) return mime;
+  const info = CodeMirror.findModeByMIME(mime);
+  return info ? info.mode : mime;
 }
 
 function syncModeButtons() {
@@ -2832,6 +2994,37 @@ function syncModeButtons() {
   const mode = tab ? tab.mode : 'source';
   $('#fileview-mode-preview').dataset.active = (mode === 'preview');
   $('#fileview-mode-source').dataset.active  = (mode === 'source');
+}
+
+function syncSaveButton() {
+  const btn = $('#fileview-save');
+  if (!btn) return;
+  const tab = activeFileTab();
+  btn.hidden = !(tab && tab.editor && tab.dirty);
+}
+
+async function saveActiveFile() {
+  const tab = activeFileTab();
+  if (!tab || !tab.editor) return;
+  const content = tab.editor.getValue();
+  try {
+    const res = await fetch('./api/fs/write', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: tab.path, content }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `HTTP ${res.status}`);
+    }
+    tab.data = { ...(tab.data || {}), content };
+    tab.dirty = false;
+    renderTabbar();
+    syncSaveButton();
+    showToast({ text: 'saved · ' + (tab.path.split('/').pop() || tab.path), kbd: '⌘S' });
+  } catch (err) {
+    showToast({ text: 'save failed: ' + (err && err.message ? err.message : String(err)), kind: 'warn' });
+  }
 }
 
 function setFileViewMode(mode) {
@@ -2859,6 +3052,8 @@ function closeFileTab(path) {
   if (!path) return;
   const idx = fileTabs.findIndex(t => t.path === path);
   if (idx === -1) return;
+  const closed = fileTabs[idx];
+  try { closed.editor?.toTextArea?.(); } catch {}
   fileTabs.splice(idx, 1);
   if (activeFilePath === path) {
     if (fileTabs.length) {
@@ -3369,6 +3564,15 @@ function bindShortcuts() {
       e.preventDefault();
       newChat();
     }
+    // Save the active file with Cmd/Ctrl+S when on a file tab with an editor.
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+      const onFile = $('#main').dataset.tab === 'file';
+      const tab = activeFileTab();
+      if (onFile && tab && tab.editor) {
+        e.preventDefault();
+        saveActiveFile();
+      }
+    }
     if (e.key === 'Escape' && document.activeElement !== $('#input')) {
       if (state.inflight) {
         const now = Date.now();
@@ -3401,6 +3605,7 @@ function bindTabbar() {
   });
   $('#fileview-mode-preview').addEventListener('click', () => setFileViewMode('preview'));
   $('#fileview-mode-source').addEventListener('click', () => setFileViewMode('source'));
+  $('#fileview-save').addEventListener('click', () => saveActiveFile());
   // Click-delegate: links in chat replies open in the in-app preview tab.
   // Cmd/Ctrl/middle-click falls through to the browser (real new tab).
   $('#thread').addEventListener('click', (e) => {
