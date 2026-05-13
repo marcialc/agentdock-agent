@@ -560,6 +560,16 @@
     background: var(--bg);
   }
   .tool[data-open="true"] .tool-body { display: block; animation: expand 180ms ease; }
+  .tool-preview {
+    padding: 6px 14px 8px 38px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--line-soft);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tool-preview.stderr { color: var(--err); }
+  .tool[data-open="true"] .tool-preview { display: none; }
   @keyframes expand {
     from { opacity: 0; transform: translateY(-2px); }
     to   { opacity: 1; transform: none; }
@@ -1626,8 +1636,53 @@ function renderToolCard(t) {
   head.addEventListener('click', () => {
     card.dataset.open = card.dataset.open === 'true' ? 'false' : 'true';
   });
-  card.append(head, renderToolBody(t));
+  card.append(head);
+  const preview = renderToolPreview(t);
+  if (preview) card.append(preview);
+  card.append(renderToolBody(t));
   return card;
+}
+
+// One-line preview shown only while the card is collapsed, so you can
+// see the gist of the result without having to click. Hidden by CSS when
+// data-open="true" since the full body renders below.
+function renderToolPreview(t) {
+  if (t._running || !t.result) return null;
+  const r = t.result;
+  let text = '';
+  let kind = '';
+  if (t.name === 'shell') {
+    const out = (typeof r.stdout === 'string' && r.stdout) ? r.stdout
+              : (typeof r.stderr === 'string' && r.stderr) ? r.stderr
+              : '';
+    text = firstLine(out);
+    kind = r.stdout ? '' : (r.stderr ? 'stderr' : '');
+  } else if (t.name === 'list_files') {
+    const entries = Array.isArray(r.entries) ? r.entries : [];
+    const names = entries.slice(0, 6).map(e => e.type === 'dir' ? e.name + '/' : e.name);
+    text = names.join('  ') + (entries.length > names.length ? `  +${entries.length - names.length} more` : '');
+  } else if (t.name === 'read_file') {
+    text = firstLine(r.contents || '');
+  } else if (t.name === 'web_search') {
+    const results = Array.isArray(r.results) ? r.results : [];
+    text = firstLine(r.answer || (results[0]?.title || ''));
+  } else if (t.name === 'web_browse') {
+    text = r.title || firstLine(r.text || '');
+  } else if (t.name === 'web_extract') {
+    text = firstLine(r.text || '');
+  } else {
+    return null;
+  }
+  if (!text) return null;
+  return el('div', { class: 'tool-preview' + (kind ? ' ' + kind : '') }, clipText(text, 140));
+}
+
+function firstLine(s) {
+  const idx = (s || '').indexOf('\n');
+  return idx === -1 ? (s || '') : s.slice(0, idx);
+}
+function clipText(s, n) {
+  return (s || '').length > n ? s.slice(0, n) + '…' : (s || '');
 }
 
 function renderUserTurn(m) {
