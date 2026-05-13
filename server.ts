@@ -11,6 +11,17 @@ const MAX_TOOL_OUTPUT = 8000;
 
 const AGENT_OWN_PORT = process.env.AGENTDOCK_AGENT_PORT || process.env.PORT || "8080";
 const PREVIEW_BASE = process.env.AGENTDOCK_PREVIEW_BASE || "";
+// Path-only portion of PREVIEW_BASE (e.g. "/__sbx/<sandbox-id>/") for framework
+// configs that take a path prefix rather than a full URL — Vite dev's `base`,
+// Next.js's `basePath`, etc.
+const PREVIEW_BASE_PATH = (() => {
+  if (!PREVIEW_BASE) return "";
+  try {
+    return new URL(PREVIEW_BASE).pathname;
+  } catch {
+    return "";
+  }
+})();
 
 const STORAGE_URL = (process.env.STORAGE_URL || "").replace(/\/$/, "");
 const STORAGE_TOKEN = process.env.STORAGE_TOKEN || "";
@@ -60,10 +71,17 @@ PATH-PREFIX-AWARE FRAMEWORK FLAGS (REQUIRED for SPA dev servers behind the proxy
     \`cd /workspace/<app> && bunx vite build --base ./ && bunx vite preview --host 0.0.0.0 --port <port> >/tmp/<app>.log 2>&1 &\`
     The \`--base ./\` MUST go on \`vite build\` (not \`vite preview\`) — Vite bakes asset URLs into index.html at build time, so a missing/wrong base on build produces \`/assets/...\` root-absolute paths that the browser resolves against the AgentDock origin (no prefix) and the page renders blank even though \`curl /\` returns 200. Relative \`./\` paths resolve under any proxy prefix without threading the full preview URL through.
     Use \`bunx vite ...\` directly (NOT \`bun run build\`/\`bun run preview\`) — the react-ts template's script is \`tsc && vite build\`, and \`tsc\` will fail on a fresh scaffold with TS2307/TS2882 errors about \`.svg\`/\`.css\` imports before vite ever runs. Skipping the script bypasses type-checking; the page still renders. If the user explicitly wants type-checking, fix the imports first.
-    Trade-off: no HMR, but the page actually renders. If the user explicitly wants HMR, edit \`vite.config.ts\` to set \`base: './'\` and run \`bun run dev -- --port <port> --host 0.0.0.0\` — warn them HMR-over-proxy is brittle.
+    Trade-off: no HMR, but the page actually renders. If the user explicitly wants HMR, see the Vite-dev section below — DO NOT just set \`base: './'\` and start dev mode; that produces a blank page (Vite dev emits root-absolute paths for \`/@vite/client\` and \`/src/main.tsx\` regardless of relative \`base\`).
+  - **Vite dev mode (only if user insists on HMR)**: set \`base\` to the FULL path prefix, not \`./\`. Edit \`vite.config.ts\`:
+    \`\`\`
+    import { defineConfig } from 'vite';
+    import react from '@vitejs/plugin-react';
+    export default defineConfig({ plugins: [react()], base: '${PREVIEW_BASE_PATH}<port>/' });
+    \`\`\`
+    Then \`cd /workspace/<app> && bunx vite dev --host 0.0.0.0 --port <port> --strictPort >/tmp/<app>.log 2>&1 &\`. Vite will now emit \`${PREVIEW_BASE_PATH}<port>/src/main.tsx\` which the proxy strips correctly. Caveat: this base is hard-coded to THIS sandbox+port — if the sandbox restarts and gets a new id, you'll need to rewrite vite.config.ts. The production-preview pattern with \`--base ./\` is portable; dev mode is not.
   - Astro: same \`bun run build && bun run preview --base ${PREVIEW_BASE}<port>/\` pattern.
   - CRA: \`PUBLIC_URL=${PREVIEW_BASE}<port> bun run build && bunx serve -s build -l <port>\`.
-  - Next.js: edit \`next.config.{js,ts}\` and set \`basePath: '<path-portion-of-${PREVIEW_BASE}><port>'\` (no trailing slash), then \`bun run dev -- -p <port> -H 0.0.0.0\`.
+  - Next.js: edit \`next.config.{js,ts}\` and set \`basePath: '${PREVIEW_BASE_PATH}<port>'\` (no trailing slash), then \`bun run dev -- -p <port> -H 0.0.0.0\`.
   - Plain static HTML / no build step: works without changes if the HTML uses relative URLs.
 - Diagnostic: \`curl -s http://localhost:<port>/ | grep -E 'src="/|href="/'\`. Any hit means absolute paths leaked through and the page will be blank. Switch to the production-preview pattern above.`
     : ""
