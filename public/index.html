@@ -830,6 +830,7 @@
   }
   .tab-close:hover { color: var(--text); }
   .tab[hidden] { display: none; }
+  .file-tabs { display: contents; }
 
   /* File viewer (replaces chat in main area when active) */
   .fileview {
@@ -1057,10 +1058,7 @@
       <button class="tab" data-tab="chat" data-active="true" id="tab-chat">
         <span class="tab-name">Chat</span>
       </button>
-      <button class="tab" data-tab="file" id="tab-file" hidden>
-        <span class="tab-name" id="tab-file-name">file</span>
-        <span class="tab-close" id="tab-file-close" title="Close">×</span>
-      </button>
+      <span class="file-tabs" id="file-tabs"></span>
       <button class="tab" data-tab="preview" id="tab-preview" hidden>
         <span class="tab-name" id="tab-preview-name">preview</span>
         <span class="tab-close" id="tab-preview-close" title="Close">×</span>
@@ -1190,6 +1188,8 @@ marked.setOptions({
 const state = {
   messages: [],         // [{role, content, time, tools?: [...]}, ...]
   inflight: null,       // running turn descriptor
+  abortController: null,
+  lastEscapeAt: 0,
   model: '@cf/moonshotai/kimi-k2.6',
   sandbox: 'sbx_4f2a',
   health: 'ready',
@@ -1797,7 +1797,12 @@ function renderTreeNode(path, isDir) {
 }
 
 // ---------- file viewer ----------
-const fileViewState = { path: null, data: null, mode: 'source' };
+const fileTabs = [];        // [{ path, data, mode, loading, error }]
+let activeFilePath = null;
+
+function activeFileTab() {
+  return activeFilePath ? fileTabs.find(t => t.path === activeFilePath) || null : null;
+}
 
 function isHtmlPath(path) {
   if (!path) return false;
@@ -1806,41 +1811,94 @@ function isHtmlPath(path) {
 }
 
 async function openFile(path) {
-  const tab = $('#tab-file');
-  const tabName = $('#tab-file-name');
-  const body = $('#fileview-body');
-  tab.hidden = false;
-  tabName.textContent = path.split('/').pop() || path;
-  tab.title = path;
+  const existing = fileTabs.find(t => t.path === path);
+  if (existing) {
+    activeFilePath = path;
+    renderFileTabs();
+    setActiveTab('file');
+    renderFileView();
+    return;
+  }
+  const tab = {
+    path,
+    data: null,
+    mode: isHtmlPath(path) ? 'preview' : 'source',
+    loading: true,
+    error: null,
+  };
+  fileTabs.push(tab);
+  activeFilePath = path;
+  renderFileTabs();
   setActiveTab('file');
-  fileViewState.path = path;
-  fileViewState.data = null;
-  fileViewState.mode = isHtmlPath(path) ? 'preview' : 'source';
-  $('#fileview-modes').dataset.show = isHtmlPath(path) ? 'true' : 'false';
-  syncModeButtons();
-  body.innerHTML = '';
-  body.append(el('div', { class: 'fileview-empty' }, 'loading…'));
+  renderFileView();
   try {
     const res = await fetch('./api/fs/read?path=' + encodeURIComponent(path));
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      body.innerHTML = '';
-      body.append(el('div', { class: 'fileview-error' }, `${res.status} — ${j.error || 'failed to read'}`));
-      return;
+      tab.error = `${res.status} — ${j.error || 'failed to read'}`;
+    } else {
+      tab.data = await res.json();
     }
-    const data = await res.json();
-    fileViewState.data = data;
-    renderFileView();
   } catch (err) {
-    body.innerHTML = '';
-    body.append(el('div', { class: 'fileview-error' }, err && err.message ? err.message : String(err)));
+    tab.error = err && err.message ? err.message : String(err);
+  } finally {
+    tab.loading = false;
+    if (activeFilePath === path) renderFileView();
+  }
+}
+
+function renderFileTabs() {
+  const host = $('#file-tabs');
+  host.innerHTML = '';
+  const onFile = $('#main').dataset.tab === 'file';
+  for (const t of fileTabs) {
+    const isActive = onFile && t.path === activeFilePath;
+    const name = t.path.split('/').pop() || t.path;
+    const btn = el('button',
+      {
+        class: 'tab',
+        'data-tab': 'file',
+        'data-path': t.path,
+        'data-active': isActive ? 'true' : 'false',
+        title: t.path,
+        onclick: (e) => {
+          if (e.target && e.target.classList.contains('tab-close')) return;
+          activeFilePath = t.path;
+          renderFileTabs();
+          setActiveTab('file');
+          renderFileView();
+        },
+      },
+      el('span', { class: 'tab-name' }, name),
+      el('span', {
+        class: 'tab-close',
+        title: 'Close',
+        onclick: (e) => { e.stopPropagation(); closeFileTab(t.path); },
+      }, '×')
+    );
+    host.append(btn);
   }
 }
 
 function renderFileView() {
   const body = $('#fileview-body');
-  const { path, data, mode } = fileViewState;
   body.innerHTML = '';
+  const tab = activeFileTab();
+  if (!tab) {
+    $('#fileview-modes').dataset.show = 'false';
+    return;
+  }
+  $('#fileview-modes').dataset.show = isHtmlPath(tab.path) ? 'true' : 'false';
+  syncModeButtons();
+  if (tab.loading) {
+    body.append(el('div', { class: 'fileview-empty' }, 'loading…'));
+    return;
+  }
+  if (tab.error) {
+    body.append(el('div', { class: 'fileview-error' }, tab.error));
+    return;
+  }
+  const { data, mode, path } = tab;
   if (!data) return;
   if (data.binary) {
     body.append(el('div', { class: 'fileview-empty' }, `Binary file (${fmtBytes(data.size||0)}) — preview unavailable`));
@@ -1862,29 +1920,58 @@ function renderFileView() {
 }
 
 function syncModeButtons() {
-  $('#fileview-mode-preview').dataset.active = (fileViewState.mode === 'preview');
-  $('#fileview-mode-source').dataset.active  = (fileViewState.mode === 'source');
+  const tab = activeFileTab();
+  const mode = tab ? tab.mode : 'source';
+  $('#fileview-mode-preview').dataset.active = (mode === 'preview');
+  $('#fileview-mode-source').dataset.active  = (mode === 'source');
 }
 
 function setFileViewMode(mode) {
   if (mode !== 'preview' && mode !== 'source') return;
-  fileViewState.mode = mode;
+  const tab = activeFileTab();
+  if (!tab) return;
+  tab.mode = mode;
   syncModeButtons();
   renderFileView();
 }
 
 function setActiveTab(which) {
+  if (which === 'file' && !activeFilePath) {
+    which = $('#tab-preview').hidden ? 'chat' : 'preview';
+  }
   $('#main').dataset.tab = which;
   $('#tab-chat').dataset.active = (which === 'chat');
-  $('#tab-file').dataset.active = (which === 'file');
   $('#tab-preview').dataset.active = (which === 'preview');
+  const host = $('#file-tabs');
+  if (host) {
+    for (const btn of host.querySelectorAll('.tab')) {
+      btn.dataset.active = (which === 'file' && btn.dataset.path === activeFilePath) ? 'true' : 'false';
+    }
+  }
 }
 
-function closeFileTab() {
-  const tab = $('#tab-file');
-  tab.hidden = true;
-  $('#fileview-body').innerHTML = '';
-  setActiveTab($('#tab-preview').hidden ? 'chat' : 'preview');
+function closeFileTab(path) {
+  if (path == null) path = activeFilePath;
+  if (!path) return;
+  const idx = fileTabs.findIndex(t => t.path === path);
+  if (idx === -1) return;
+  fileTabs.splice(idx, 1);
+  if (activeFilePath === path) {
+    if (fileTabs.length) {
+      const next = fileTabs[idx] || fileTabs[idx - 1] || fileTabs[0];
+      activeFilePath = next.path;
+      renderFileTabs();
+      setActiveTab('file');
+      renderFileView();
+    } else {
+      activeFilePath = null;
+      renderFileTabs();
+      $('#fileview-body').innerHTML = '';
+      setActiveTab($('#tab-preview').hidden ? 'chat' : 'preview');
+    }
+  } else {
+    renderFileTabs();
+  }
 }
 
 // ---------- URL preview tab ----------
@@ -1914,7 +2001,7 @@ function closePreviewTab() {
   $('#tab-preview').hidden = true;
   $('#urlview-iframe').src = 'about:blank';
   previewState.url = null;
-  setActiveTab($('#tab-file').hidden ? 'chat' : 'file');
+  setActiveTab(activeFilePath ? 'file' : 'chat');
 }
 
 function reloadPreview() {
@@ -1954,6 +2041,8 @@ async function send() {
   renderThread();
 
   let usedStream = false;
+  const ac = new AbortController();
+  state.abortController = ac;
   try {
     try {
       await streamChat(state.messages, state.model, (event) => {
@@ -1961,8 +2050,9 @@ async function send() {
         applyStreamEvent(event);
         renderThread();
         renderRail();
-      });
+      }, ac.signal);
     } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
       if (usedStream) throw e;
       // streaming endpoint missing or unreachable — degrade to mocked animation
       // so the static page still feels alive when served without a backend
@@ -1999,9 +2089,12 @@ async function send() {
       state.tokens += Math.ceil((f.reply||'').length / 4);
     }
   } catch (e) {
-    showBanner(e.message || 'Request failed', e.payload);
+    if (!(e && e.name === 'AbortError')) {
+      showBanner(e.message || 'Request failed', e.payload);
+    }
   } finally {
     state.inflight = null;
+    state.abortController = null;
     $('#send').disabled = !$('#input').value.trim();
     renderMeter();
     renderThread();
@@ -2054,15 +2147,17 @@ async function runLocalShell(command, displayText) {
   }
 }
 
-async function streamChat(messages, model, onEvent) {
+async function streamChat(messages, model, onEvent, signal) {
   let r;
   try {
     r = await fetch('./api/chat/stream', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'accept': 'application/x-ndjson' },
-      body: JSON.stringify({ messages, model })
+      body: JSON.stringify({ messages, model }),
+      signal
     });
   } catch (e) {
+    if (e && e.name === 'AbortError') throw e;
     // network-level failure — let caller fall back to mock
     throw Object.assign(new Error(e.message || 'network error'), { network: true });
   }
@@ -2215,6 +2310,8 @@ function applyStreamEvent(event) {
 }
 
 function stopTurn() {
+  state.abortController?.abort();
+  state.abortController = null;
   state.inflight = null;
   renderThread();
 }
@@ -2322,8 +2419,20 @@ function bindShortcuts() {
       e.preventDefault();
       newChat();
     }
-    if (e.key === 'Escape' && $('#main').dataset.tab === 'file' && document.activeElement !== $('#input')) {
-      closeFileTab();
+    if (e.key === 'Escape' && document.activeElement !== $('#input')) {
+      if (state.inflight) {
+        const now = Date.now();
+        if (now - state.lastEscapeAt < 400) {
+          stopTurn();
+          state.lastEscapeAt = 0;
+        } else {
+          state.lastEscapeAt = now;
+        }
+        return;
+      }
+      if ($('#main').dataset.tab === 'file') {
+        closeFileTab();
+      }
     }
   });
   $('#new-chat').addEventListener('click', newChat);
@@ -2331,14 +2440,6 @@ function bindShortcuts() {
 
 function bindTabbar() {
   $('#tab-chat').addEventListener('click', () => setActiveTab('chat'));
-  $('#tab-file').addEventListener('click', (e) => {
-    if (e.target && e.target.id === 'tab-file-close') return;
-    setActiveTab('file');
-  });
-  $('#tab-file-close').addEventListener('click', (e) => {
-    e.stopPropagation();
-    closeFileTab();
-  });
   $('#tab-preview').addEventListener('click', (e) => {
     if (e.target && e.target.id === 'tab-preview-close') return;
     setActiveTab('preview');
@@ -2372,6 +2473,8 @@ function bindTabbar() {
   });
 }
 function newChat() {
+  state.abortController?.abort();
+  state.abortController = null;
   state.messages = [];
   state.inflight = null;
   state.tokens = 0;
