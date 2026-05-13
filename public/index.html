@@ -1761,6 +1761,14 @@ function linkifyBareUrls(html) {
     });
 }
 
+function thinkingLabel(turn) {
+  const since = turn.thinkingSince || turn.startedAt || Date.now();
+  const secs = Math.max(0, Math.floor((Date.now() - since) / 1000));
+  const round = turn.currentRound > 0 ? ` · round ${turn.currentRound}/${turn.rounds}` : '';
+  const stall = secs >= 30 ? 'still waiting — model is slow' : 'thinking…';
+  return `${stall} ${secs}s${round}`;
+}
+
 function renderLive(turn) {
   // turn = { rounds, currentRound, events:[{kind, ...}], thinking }
   const wrap = el('div', { class: 'turn full' });
@@ -1800,13 +1808,9 @@ function renderLive(turn) {
   }
 
   if (turn.thinking) {
-    const since = turn.thinkingSince || turn.startedAt || Date.now();
-    const secs = Math.max(0, Math.floor((Date.now() - since) / 1000));
-    const round = turn.currentRound > 0 ? ` · round ${turn.currentRound}/${turn.rounds}` : '';
-    const stall = secs >= 30 ? 'still waiting — model is slow' : 'thinking…';
     live.append(el('div', { class: 'live-thinking' },
       el('span', { class: 'dot', style: 'width:7px;height:7px;border-radius:50%;background:var(--accent);animation:softPulse 1.4s ease-in-out infinite;display:inline-block' }),
-      `${stall} ${secs}s${round}`
+      el('span', { class: 'live-thinking-label' }, thinkingLabel(turn))
     ));
   }
   wrap.append(live);
@@ -2218,10 +2222,13 @@ async function send() {
     thinkingSince: Date.now(),
     finalData: null
   };
-  // Tick the "thinking… Ns" timer even when no events arrive, so the user
-  // can see the agent isn't frozen during a long model call.
+  // Tick the "thinking… Ns" label without re-rendering the whole thread,
+  // so the user can see the agent isn't frozen during a long model call
+  // and we don't flicker / lose scroll / re-collapse tool cards.
   const tickHandle = setInterval(() => {
-    if (state.inflight && state.inflight.thinking) renderThread();
+    if (!state.inflight || !state.inflight.thinking) return;
+    const label = document.querySelector('.live-thinking-label');
+    if (label) label.textContent = thinkingLabel(state.inflight);
   }, 1000);
   renderThread();
   // Lazy-create a server-side chat on the first user message (no-op when persistence is off).
