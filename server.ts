@@ -57,7 +57,8 @@ LAUNCHING WEB SERVERS:
 PATH-PREFIX-AWARE FRAMEWORK FLAGS (REQUIRED for SPA dev servers behind the proxy):
 - The proxy serves the app at \`${PREVIEW_BASE}<port>/\` and STRIPS the \`/__sbx/<sandbox-id>/<port>\` prefix before forwarding to \`localhost:<port>\`. Most frameworks emit absolute asset paths like \`/src/main.tsx\`. Those resolve to the AgentDock origin root (no prefix) and serve the wrong content — the page loads blank. Configure the framework so emitted URLs include the prefix:
   - **Vite (RECOMMENDED for SPAs): use the production preview, not dev.** Vite dev silently ignores \`--base\` when it's a full URL, so HMR mode emits root-absolute paths and breaks behind the proxy. Run instead:
-    \`cd /workspace/<app> && bun run build && bun run preview -- --host 0.0.0.0 --port <port> --base ${PREVIEW_BASE}<port>/ >/tmp/<app>.log 2>&1 &\`
+    \`cd /workspace/<app> && bunx vite build && bunx vite preview --host 0.0.0.0 --port <port> --base ${PREVIEW_BASE}<port>/ >/tmp/<app>.log 2>&1 &\`
+    Use \`bunx vite ...\` directly (NOT \`bun run build\`/\`bun run preview\`) — the react-ts template's script is \`tsc && vite build\`, and \`tsc\` will fail on a fresh scaffold with TS2307/TS2882 errors about \`.svg\`/\`.css\` imports before vite ever runs. Skipping the script bypasses type-checking; the page still renders. If the user explicitly wants type-checking, fix the imports first.
     Trade-off: no HMR, but the page actually renders. If the user explicitly wants HMR, edit \`vite.config.ts\` to set \`base: './'\` and run \`bun run dev -- --port <port> --host 0.0.0.0\` — warn them HMR-over-proxy is brittle.
   - Astro: same \`bun run build && bun run preview --base ${PREVIEW_BASE}<port>/\` pattern.
   - CRA: \`PUBLIC_URL=${PREVIEW_BASE}<port> bun run build && bunx serve -s build -l <port>\`.
@@ -734,16 +735,19 @@ Bun.serve({
     if (url.pathname.startsWith("/api/screenshots/") && req.method === "GET") {
       if (!STORAGE_ENABLED) return jsonError(503, "Web tools are not available in this sandbox");
       const id = url.pathname.slice("/api/screenshots/".length);
-      if (!id || id.includes("/")) return jsonError(400, "invalid screenshot id");
+      if (!/^[a-f0-9]{24,32}$/.test(id)) return jsonError(400, "invalid screenshot id");
       let upstream: Response;
       try {
-        upstream = await fetch(`${TOOLS_BASE}/screenshots/${encodeURIComponent(id)}`, {
+        upstream = await fetch(`${TOOLS_BASE}/screenshots/${id}`, {
           headers: { authorization: `Bearer ${STORAGE_TOKEN}` },
         });
       } catch (err) {
         return jsonError(502, err instanceof Error ? err.message : String(err));
       }
-      if (upstream.status === 401) return jsonError(401, "Storage credentials expired, redeploy from AgentDock");
+      if (upstream.status === 401) {
+        console.error("[agentdock-agent] STORAGE_TOKEN rejected — redeploy from AgentDock");
+        return jsonError(502, "Storage credentials expired, redeploy from AgentDock");
+      }
       if (!upstream.ok || !upstream.body) {
         const text = await upstream.text().catch(() => "");
         return jsonError(upstream.status, text || `upstream ${upstream.status}`);
