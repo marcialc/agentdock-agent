@@ -12,6 +12,16 @@ const MAX_TOOL_OUTPUT = 8000;
 const AGENT_OWN_PORT = process.env.AGENTDOCK_AGENT_PORT || process.env.PORT || "8080";
 const PREVIEW_BASE = process.env.AGENTDOCK_PREVIEW_BASE || "";
 
+const STORAGE_URL = (process.env.STORAGE_URL || "").replace(/\/$/, "");
+const STORAGE_TOKEN = process.env.STORAGE_TOKEN || "";
+const STORAGE_ENABLED = STORAGE_URL.length > 0 && STORAGE_TOKEN.length > 0;
+const TOOLS_BASE = STORAGE_ENABLED ? STORAGE_URL.replace(/\/storage$/, "/tools") : "";
+if (!STORAGE_ENABLED) {
+  console.warn(
+    "[agentdock-agent] STORAGE_URL/STORAGE_TOKEN not set — web tools and chat persistence disabled",
+  );
+}
+
 const SYSTEM_PROMPT = `You are AgentDock-Agent, a minimal autonomous assistant running inside a Cloudflare Sandbox container.
 
 You have access to four tools that operate on the sandbox filesystem:
@@ -56,7 +66,16 @@ PATH-PREFIX-AWARE FRAMEWORK FLAGS (REQUIRED for SPA dev servers behind the proxy
 - Diagnostic: \`curl -s http://localhost:<port>/ | grep -E 'src="/|href="/'\`. Any hit means absolute paths leaked through and the page will be blank. Switch to the production-preview pattern above.`
     : ""
 }
-- You cannot see rendered output yourself (no browser/screenshot tool). To validate, \`curl\` the URL and reason about the HTML/JSON, or hand the preview URL back to the user.`;
+- You cannot see rendered output yourself (no browser/screenshot tool). To validate, \`curl\` the URL and reason about the HTML/JSON, or hand the preview URL back to the user.${
+  STORAGE_ENABLED
+    ? `
+
+WEB TOOLS (use these instead of \`shell\` + \`curl\` when researching or browsing the public web):
+- \`web_search\`: search the web for recent information. Returns a synthesized answer plus source URLs.
+- \`web_extract\`: fetch a URL's readable text quickly (no rendering). Use when you only need the text.
+- \`web_browse\`: load a URL in a real headless browser. Returns page text plus a screenshot the user can see — use when the user asks to "open" / "show" a page, or when rendered content matters.`
+    : ""
+}`;
 
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -71,6 +90,52 @@ interface ToolCall {
   type: "function";
   function: { name: string; arguments: string };
 }
+
+const WEB_TOOL_DEFS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "web_search",
+      description:
+        "Search the web for recent information. Use when the user asks about current events, news, or anything that might have changed since training. Returns a synthesized answer plus source URLs.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query." },
+          count: { type: "integer", description: "Number of results (1-10).", minimum: 1, maximum: 10 },
+          include_answer: { type: "boolean", description: "Include a synthesized answer (default true)." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "web_browse",
+      description:
+        "Fetch a URL with a real headless browser, returning the page title, visible text, and a screenshot. Use when you need to read the actual rendered content of a page or show the user what the page looks like.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string", description: "Absolute http(s) URL." } },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "web_extract",
+      description:
+        "Quickly fetch and clean the readable text of a URL without rendering. Faster and cheaper than web_browse — use when you only need the text and don't need a screenshot.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string", description: "Absolute http(s) URL." } },
+        required: ["url"],
+      },
+    },
+  },
+];
 
 const TOOL_DEFS = [
   {
@@ -130,6 +195,7 @@ const TOOL_DEFS = [
       },
     },
   },
+  ...(STORAGE_ENABLED ? WEB_TOOL_DEFS : []),
 ];
 
 function clip(text: string, max = MAX_TOOL_OUTPUT): string {
@@ -170,6 +236,45 @@ async function execShell(args: { command: string; cwd?: string; timeout_ms?: num
   });
 }
 
+async function callToolsApi(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
+  if (!STORAGE_ENABLED) {
+    return { ok: false, error: "Web tools are not available in this sandbox (STORAGE_URL/STORAGE_TOKEN missing)." };
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${TOOLS_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${STORAGE_TOKEN}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  if (res.status === 401) {
+    return { ok: false, error: "Storage credentials expired, redeploy from AgentDock" };
+  }
+  if (res.status === 503) {
+    return { ok: false, error: "Web tools not configured by AgentDock (parent worker missing TAVILY_API_KEY)" };
+  }
+  let json: Record<string, unknown>;
+  try {
+    json = (await res.json()) as Record<string, unknown>;
+  } catch {
+    return { ok: false, error: `Web tool returned non-JSON (HTTP ${res.status})` };
+  }
+  if (!res.ok) {
+    const msg = typeof json.error === "string" ? json.error : `HTTP ${res.status}`;
+    return { ok: false, error: msg };
+  }
+  return { ok: true, data: json };
+}
+
 async function execTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   try {
     if (name === "shell") {
@@ -200,6 +305,33 @@ async function execTool(name: string, args: Record<string, unknown>): Promise<un
         }),
       );
       return { entries: detailed };
+    }
+    if (name === "web_search") {
+      const query = String(args.query ?? "").trim();
+      if (!query) return { error: "query is required" };
+      const body: Record<string, unknown> = { query };
+      if (typeof args.count === "number") body.count = args.count;
+      if (typeof args.include_answer === "boolean") body.includeAnswer = args.include_answer;
+      const r = await callToolsApi("/search", body);
+      return r.ok ? r.data : { error: r.error };
+    }
+    if (name === "web_extract") {
+      const url = String(args.url ?? "").trim();
+      if (!url) return { error: "url is required" };
+      const r = await callToolsApi("/extract", { url });
+      return r.ok ? r.data : { error: r.error };
+    }
+    if (name === "web_browse") {
+      const url = String(args.url ?? "").trim();
+      if (!url) return { error: "url is required" };
+      const r = await callToolsApi("/browse", { url });
+      if (!r.ok) return { error: r.error };
+      // Rewrite screenshotPath so the UI can fetch via our own bearer-less proxy.
+      const sid = typeof r.data.screenshotId === "string" ? r.data.screenshotId : undefined;
+      return {
+        ...r.data,
+        screenshotPath: sid ? `/api/screenshots/${encodeURIComponent(sid)}` : r.data.screenshotPath,
+      };
     }
     return { error: `unknown tool: ${name}` };
   } catch (err) {
@@ -599,6 +731,37 @@ Bun.serve({
       }
     }
 
+    if (url.pathname.startsWith("/api/screenshots/") && req.method === "GET") {
+      if (!STORAGE_ENABLED) return jsonError(503, "Web tools are not available in this sandbox");
+      const id = url.pathname.slice("/api/screenshots/".length);
+      if (!id || id.includes("/")) return jsonError(400, "invalid screenshot id");
+      let upstream: Response;
+      try {
+        upstream = await fetch(`${TOOLS_BASE}/screenshots/${encodeURIComponent(id)}`, {
+          headers: { authorization: `Bearer ${STORAGE_TOKEN}` },
+        });
+      } catch (err) {
+        return jsonError(502, err instanceof Error ? err.message : String(err));
+      }
+      if (upstream.status === 401) return jsonError(401, "Storage credentials expired, redeploy from AgentDock");
+      if (!upstream.ok || !upstream.body) {
+        const text = await upstream.text().catch(() => "");
+        return jsonError(upstream.status, text || `upstream ${upstream.status}`);
+      }
+      return new Response(upstream.body, {
+        status: 200,
+        headers: {
+          "content-type": upstream.headers.get("content-type") || "image/png",
+          "cache-control": "private, max-age=300",
+          ...corsHeaders(),
+        },
+      });
+    }
+
+    if (url.pathname.startsWith("/api/chats") && req.method !== "OPTIONS") {
+      return await proxyChats(req, url);
+    }
+
     if (url.pathname === "/api/chat" && req.method === "POST") {
       const reqStart = Date.now();
       try {
@@ -702,6 +865,61 @@ Bun.serve({
     return new Response("not found", { status: 404 });
   },
 });
+
+// Only the endpoints listed in the AgentDock brief. Anything outside this
+// allowlist returns 404 to avoid accidentally forwarding arbitrary paths.
+function matchChatProxy(path: string, method: string): { upstreamPath: string } | null {
+  if (path === "/api/chats" && (method === "GET" || method === "POST")) {
+    return { upstreamPath: "/chats" };
+  }
+  const idMatch = path.match(/^\/api\/chats\/([^/]+)$/);
+  if (idMatch && (method === "GET" || method === "PATCH" || method === "DELETE")) {
+    return { upstreamPath: `/chats/${idMatch[1]}` };
+  }
+  const msgMatch = path.match(/^\/api\/chats\/([^/]+)\/messages$/);
+  if (msgMatch && method === "POST") {
+    return { upstreamPath: `/chats/${msgMatch[1]}/messages` };
+  }
+  return null;
+}
+
+async function proxyChats(req: Request, url: URL): Promise<Response> {
+  if (!STORAGE_ENABLED) {
+    return jsonError(503, "Chat persistence is not available in this sandbox (STORAGE_URL/STORAGE_TOKEN missing)");
+  }
+  const matched = matchChatProxy(url.pathname, req.method);
+  if (!matched) return jsonError(404, "not found");
+  const upstreamUrl = `${STORAGE_URL}${matched.upstreamPath}${url.search}`;
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${STORAGE_TOKEN}`,
+  };
+  let body: string | undefined;
+  if (req.method !== "GET" && req.method !== "DELETE") {
+    const ct = req.headers.get("content-type");
+    if (ct) headers["content-type"] = ct;
+    body = await req.text();
+  }
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, { method: req.method, headers, body });
+  } catch (err) {
+    return jsonError(502, err instanceof Error ? err.message : String(err));
+  }
+  const text = await upstream.text();
+  if (upstream.status === 401) {
+    return new Response(
+      JSON.stringify({ error: "Storage credentials expired, redeploy from AgentDock" }),
+      { status: 401, headers: { "content-type": "application/json", ...corsHeaders() } },
+    );
+  }
+  return new Response(text, {
+    status: upstream.status,
+    headers: {
+      "content-type": upstream.headers.get("content-type") || "application/json",
+      ...corsHeaders(),
+    },
+  });
+}
 
 function corsHeaders(): Record<string, string> {
   return {

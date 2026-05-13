@@ -175,6 +175,31 @@
   }
   .icon-btn svg, .ghost-btn svg { width: 14px; height: 14px; }
 
+  .chats-menu { position: relative; }
+  .chats-menu[hidden] { display: none; }
+  .chats-menu #chats-label {
+    max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chats-dropdown {
+    position: absolute; top: calc(100% + 4px); right: 0;
+    min-width: 240px; max-width: 320px; max-height: 360px; overflow-y: auto;
+    background: var(--bg-1); border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    z-index: 50; padding: 4px;
+  }
+  .chats-dropdown[hidden] { display: none; }
+  .chats-item {
+    display: block; width: 100%; text-align: left;
+    background: transparent; color: var(--text-dim);
+    border: 0; padding: 6px 10px; border-radius: 4px;
+    font-size: 12.5px; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chats-item:hover { background: var(--bg-2); color: var(--text); }
+  .chats-item[data-active="true"] { color: var(--text); background: var(--accent-soft); }
+  .chats-empty { color: var(--text-faint); font-size: 12px; padding: 8px 10px; }
+
   /* Workspace rail */
   .rail {
     grid-row: 2 / 4;
@@ -545,6 +570,21 @@
     border-bottom: 1px solid var(--line-soft);
   }
   .tool-section:last-child { border-bottom: 0; }
+  .web-answer {
+    font-size: 13px; line-height: 1.45;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .web-results { list-style: decimal; padding-left: 22px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .web-results a { color: var(--accent); text-decoration: none; font-weight: 500; }
+  .web-results a:hover { text-decoration: underline; }
+  .web-snippet { color: var(--text-dim); font-size: 12px; margin-top: 2px; }
+  .web-url { color: var(--text-faint); font-size: 11px; font-family: var(--mono); margin-top: 2px; overflow-wrap: anywhere; }
+  .web-screenshot {
+    display: block; max-width: 100%; height: auto;
+    border: 1px solid var(--line-soft); border-radius: 6px;
+    margin: 6px 0 8px;
+  }
   .tool-section-label {
     font-size: 10.5px;
     text-transform: uppercase;
@@ -1030,6 +1070,13 @@
     </div>
     <div class="header-spacer"></div>
     <div class="header-actions">
+      <div class="chats-menu" id="chats-menu" hidden>
+        <button class="ghost-btn" id="chats-toggle" title="Switch chat">
+          <span id="chats-label">chats</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6l4 4 4-4"/></svg>
+        </button>
+        <div class="chats-dropdown" id="chats-dropdown" hidden></div>
+      </div>
       <button class="ghost-btn" id="new-chat" title="New chat (⌘N)">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10"/></svg>
         new chat
@@ -1166,10 +1213,13 @@ const fmtBytes = b => b<1024 ? b+' B' : b<1024*1024 ? (b/1024).toFixed(1)+' kB' 
 const escHtml = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const summarize = (name, args) => {
   if (!args) return '';
-  if (name === 'shell')      return args.cmd || args.command || '';
-  if (name === 'read_file')  return args.path || '';
-  if (name === 'write_file') return args.path || '';
-  if (name === 'list_files') return args.path || '';
+  if (name === 'shell')       return args.cmd || args.command || '';
+  if (name === 'read_file')   return args.path || '';
+  if (name === 'write_file')  return args.path || '';
+  if (name === 'list_files')  return args.path || '';
+  if (name === 'web_search')  return args.query || '';
+  if (name === 'web_browse')  return args.url || '';
+  if (name === 'web_extract') return args.url || '';
   return JSON.stringify(args);
 };
 
@@ -1197,6 +1247,11 @@ const state = {
   tweaks: { workspace: true, read: 70, mono: 'JetBrains Mono' },
   tokens: 0,
   tokenBudget: 200_000,
+  // persistence (filled in by initChats() when STORAGE_* are configured)
+  persistEnabled: false,
+  chatId: null,
+  chatTitle: null,
+  chatList: [],
 };
 
 // ---------- mock backend ----------
@@ -1471,6 +1526,43 @@ function renderToolBody(t) {
       else                  view.append(renderCodeBlock(r.after||'', r.lang||'plaintext'));
     }
     view.append(renderDiff(r.before||'', r.after||''));
+    resultEl = sec;
+  } else if (t.name === 'web_search') {
+    const results = Array.isArray(r.results) ? r.results : [];
+    const sec = el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, `result · ${results.length} sources`)
+    );
+    if (r.answer) {
+      sec.append(el('div', { class: 'web-answer' }, String(r.answer)));
+    }
+    const list = el('ol', { class: 'web-results' });
+    for (const item of results) {
+      const li = el('li', {},
+        el('a', { href: item.url || '#', target: '_blank', rel: 'noreferrer' }, item.title || item.url || '(untitled)'),
+        item.description ? el('div', { class: 'web-snippet' }, String(item.description)) : null,
+        el('div', { class: 'web-url' }, String(item.url || ''))
+      );
+      list.append(li);
+    }
+    sec.append(list);
+    resultEl = sec;
+  } else if (t.name === 'web_extract') {
+    resultEl = el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, `result · ${fmtBytes((r.text||'').length)}`),
+      r.url ? el('div', { class: 'web-url' }, String(r.url)) : null,
+      el('pre', { class: 'code' }, r.text || (r.error ? '' : '(empty)'))
+    );
+  } else if (t.name === 'web_browse') {
+    const sec = el('div', { class: 'tool-section' },
+      el('div', { class: 'tool-section-label' }, r.title ? `result · ${r.title}` : 'result')
+    );
+    if (r.url) sec.append(el('div', { class: 'web-url' }, String(r.url)));
+    if (r.screenshotPath) {
+      sec.append(el('img', { class: 'web-screenshot', src: String(r.screenshotPath), alt: r.title || r.url || 'screenshot' }));
+    }
+    if (r.text) {
+      sec.append(el('pre', { class: 'code' }, r.text));
+    }
     resultEl = sec;
   } else {
     resultEl = el('div', { class: 'tool-section' },
@@ -2039,6 +2131,8 @@ async function send() {
     finalData: null
   };
   renderThread();
+  // Lazy-create a server-side chat on the first user message (no-op when persistence is off).
+  await ensureChatExists(text);
 
   let usedStream = false;
   const ac = new AbortController();
@@ -2080,13 +2174,23 @@ async function send() {
 
     const f = state.inflight.finalData;
     if (f) {
-      state.messages.push({
+      const assistantMsg = {
         role: 'assistant',
         content: f.reply || '',
         time: fmtTime(),
         tools: f.toolEvents || []
-      });
+      };
+      state.messages.push(assistantMsg);
       state.tokens += Math.ceil((f.reply||'').length / 4);
+      // Persist user + assistant turn (no-op when persistence is off).
+      await appendMessagesToChat([
+        { role: 'user', content: text },
+        {
+          role: 'assistant',
+          content: assistantMsg.content,
+          metadata: assistantMsg.tools && assistantMsg.tools.length ? { tools: assistantMsg.tools } : undefined,
+        },
+      ]);
     }
   } catch (e) {
     if (!(e && e.name === 'AbortError')) {
@@ -2478,11 +2582,140 @@ function newChat() {
   state.messages = [];
   state.inflight = null;
   state.tokens = 0;
+  state.chatId = null;
+  state.chatTitle = null;
+  renderChatsMenu();
   for (const k of Object.keys(touched)) delete touched[k];
   renderThread();
   renderMeter();
   renderRail();
   $('#input').focus();
+}
+
+// ---------- chat persistence ----------
+// All endpoints are proxied through the agent's own server so the bearer
+// stays on the backend. /api/chats* returns 503 when STORAGE_* aren't set —
+// in that case we hide the chats dropdown and fall back to in-memory only.
+async function chatsFetch(path, init) {
+  const res = await fetch('.' + path, init);
+  if (res.status === 503) return { disabled: true, res };
+  return { disabled: false, res };
+}
+
+async function initChats() {
+  const menu = $('#chats-menu');
+  let list;
+  try {
+    const { disabled, res } = await chatsFetch('/api/chats?limit=20');
+    if (disabled) { menu.hidden = true; return; }
+    if (!res.ok) { menu.hidden = true; return; }
+    list = await res.json();
+  } catch {
+    menu.hidden = true;
+    return;
+  }
+  state.persistEnabled = true;
+  state.chatList = Array.isArray(list?.chats) ? list.chats : [];
+  menu.hidden = false;
+  // load most recent chat if any
+  const recent = state.chatList[0];
+  if (recent) await loadChat(recent.id);
+  renderChatsMenu();
+}
+
+async function loadChat(id) {
+  try {
+    const res = await fetch('./api/chats/' + encodeURIComponent(id));
+    if (!res.ok) return;
+    const data = await res.json();
+    const msgs = Array.isArray(data?.messages) ? data.messages : [];
+    state.chatId = id;
+    state.chatTitle = data?.chat?.title || '(untitled)';
+    state.messages = msgs.map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : '',
+      time: fmtTime(m.createdAt ? new Date(m.createdAt) : new Date()),
+      tools: (m.metadata && Array.isArray(m.metadata.tools)) ? m.metadata.tools : undefined,
+    }));
+    state.tokens = msgs.reduce((n, m) => n + (typeof m.tokenCount === 'number' ? m.tokenCount : 0), 0);
+    renderHeader();
+    renderThread();
+    renderMeter();
+    renderChatsMenu();
+  } catch {
+    /* leave state alone on failure */
+  }
+}
+
+async function ensureChatExists(firstUserMessage) {
+  if (state.chatId) return state.chatId;
+  if (!state.persistEnabled) return null;
+  const title = (firstUserMessage || '').trim().slice(0, 60) || 'New chat';
+  try {
+    const res = await fetch('./api/chats', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) return null;
+    const summary = await res.json();
+    state.chatId = summary.id;
+    state.chatTitle = summary.title || title;
+    state.chatList.unshift(summary);
+    renderChatsMenu();
+    return state.chatId;
+  } catch {
+    return null;
+  }
+}
+
+async function appendMessagesToChat(messagesToAppend) {
+  if (!state.chatId || !state.persistEnabled || !messagesToAppend.length) return;
+  try {
+    await fetch('./api/chats/' + encodeURIComponent(state.chatId) + '/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: messagesToAppend }),
+    });
+  } catch {
+    /* non-fatal — in-memory state still reflects the turn */
+  }
+}
+
+function renderChatsMenu() {
+  const label = $('#chats-label');
+  const drop = $('#chats-dropdown');
+  if (!label || !drop) return;
+  label.textContent = state.chatTitle ? state.chatTitle : 'chats';
+  drop.innerHTML = '';
+  if (!state.chatList.length) {
+    drop.append(el('div', { class: 'chats-empty' }, 'no saved chats'));
+    return;
+  }
+  for (const c of state.chatList) {
+    const btn = el('button', {
+      class: 'chats-item',
+      'data-active': c.id === state.chatId ? 'true' : 'false',
+      title: c.title || '',
+      onclick: async () => {
+        $('#chats-dropdown').hidden = true;
+        if (c.id !== state.chatId) await loadChat(c.id);
+      },
+    }, c.title || '(untitled)');
+    drop.append(btn);
+  }
+}
+
+function bindChatsMenu() {
+  $('#chats-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const d = $('#chats-dropdown');
+    d.hidden = !d.hidden;
+  });
+  document.addEventListener('click', (e) => {
+    const menu = $('#chats-menu');
+    if (!menu.contains(e.target)) $('#chats-dropdown').hidden = true;
+  });
 }
 
 // ---------- init ----------
@@ -2492,6 +2725,7 @@ async function init() {
   bindShortcuts();
   bindTweaks();
   bindTabbar();
+  bindChatsMenu();
   // Health
   const h = await fetchHealth();
   state.model = h.model || state.model;
@@ -2501,6 +2735,8 @@ async function init() {
   fetchDir(ROOT);
   renderRail();
   renderMeter();
+  await initChats();
+  renderThread();
 }
 init();
 </script>
