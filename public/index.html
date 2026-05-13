@@ -1717,9 +1717,13 @@ function renderLive(turn) {
   }
 
   if (turn.thinking) {
+    const since = turn.thinkingSince || turn.startedAt || Date.now();
+    const secs = Math.max(0, Math.floor((Date.now() - since) / 1000));
+    const round = turn.currentRound > 0 ? ` · round ${turn.currentRound}/${turn.rounds}` : '';
+    const stall = secs >= 30 ? 'still waiting — model is slow' : 'thinking…';
     live.append(el('div', { class: 'live-thinking' },
       el('span', { class: 'dot', style: 'width:7px;height:7px;border-radius:50%;background:var(--accent);animation:softPulse 1.4s ease-in-out infinite;display:inline-block' }),
-      'thinking…'
+      `${stall} ${secs}s${round}`
     ));
   }
   wrap.append(live);
@@ -2128,8 +2132,14 @@ async function send() {
     toolsById: {},       // for fast tool_done lookup
     thinking: true,
     startedAt: Date.now(),
+    thinkingSince: Date.now(),
     finalData: null
   };
+  // Tick the "thinking… Ns" timer even when no events arrive, so the user
+  // can see the agent isn't frozen during a long model call.
+  const tickHandle = setInterval(() => {
+    if (state.inflight && state.inflight.thinking) renderThread();
+  }, 1000);
   renderThread();
   // Lazy-create a server-side chat on the first user message (no-op when persistence is off).
   await ensureChatExists(text);
@@ -2197,6 +2207,7 @@ async function send() {
       showBanner(e.message || 'Request failed', e.payload);
     }
   } finally {
+    clearInterval(tickHandle);
     state.inflight = null;
     state.abortController = null;
     $('#send').disabled = !$('#input').value.trim();
@@ -2361,6 +2372,7 @@ function applyStreamEvent(event) {
       break;
     case 'model_call':
       turn.thinking = true;
+      turn.thinkingSince = Date.now();
       break;
     case 'model_text':
       turn.thinking = false;
@@ -2391,6 +2403,7 @@ function applyStreamEvent(event) {
         if (entry.name === 'write_file' && entry.args?.path) touched[entry.args.path] = 'w';
       }
       turn.thinking = true; // waiting for next model call
+      turn.thinkingSince = Date.now();
       break;
     }
     case 'max_rounds':
