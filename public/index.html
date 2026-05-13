@@ -1237,23 +1237,19 @@
   .fileview-body {
     flex: 1; min-height: 0;
     padding: 14px;
-    display: flex; flex-direction: column;
-    overflow: hidden;
+    overflow: auto;
   }
   .fileview-body iframe {
-    flex: 1; width: 100%; border: 0; background: var(--bg-1);
+    width: 100%; height: calc(100vh - var(--header-h) - var(--tabbar-h) - 60px);
+    border: 0; background: var(--bg-1);
     border-radius: var(--radius-sm);
   }
-  /* In the file viewer the code block IS the whole surface — let it grow
-     to fill the available height instead of capping at the tool-card-sized
-     320px max-height. */
-  .fileview-body .tc-code {
-    flex: 1; min-height: 0;
-    display: flex; flex-direction: column;
-  }
+  /* In the file viewer the code block is the whole surface — let it grow
+     and let the fileview-body handle scrolling instead of capping at the
+     tool-card-sized 320px max-height. */
   .fileview-body .tc-code-body {
-    flex: 1; min-height: 0;
     max-height: none;
+    overflow: visible;
   }
   .fileview-body pre { margin: 0; }
   .fileview-empty, .fileview-error {
