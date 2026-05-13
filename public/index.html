@@ -1214,6 +1214,9 @@
   .main[data-tab="file"] .fileview { display: flex; }
   .main[data-tab="preview"] .thread-host { display: none; }
   .main[data-tab="preview"] .urlview { display: flex; }
+  /* Hide the composer on file/preview tabs — it's only meaningful in chat. */
+  .main[data-tab="file"] .composer-wrap,
+  .main[data-tab="preview"] .composer-wrap { display: none; }
 
   .fileview-modes {
     display: none; gap: 4px; padding: 8px 12px;
