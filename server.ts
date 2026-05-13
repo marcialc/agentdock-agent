@@ -59,8 +59,11 @@ WHEN ASKED TO CREATE / SCAFFOLD / "NEW <X> PROJECT":
 LAUNCHING WEB SERVERS:
 - Port ${AGENT_OWN_PORT} is already bound by this agent UI. NEVER start a child web server on ${AGENT_OWN_PORT} — pick 8081, 8082, 5174, 3001, etc.
 - Set the port explicitly: \`PORT=8081 bun run server.ts\`, \`bun run dev -- --port 5174 --host 0.0.0.0\`, \`next dev -p 3001 -H 0.0.0.0\`. \`--host 0.0.0.0\` is required for Vite/Next so the proxy can reach it.
-- Run in the background: append \` >/tmp/<name>.log 2>&1 &\` so you don't block. Tail the log if you need to debug.
-- Verify it's actually listening before claiming success: \`sleep 1 && curl -sf http://localhost:<port>/ >/dev/null && echo OK || tail -c 2000 /tmp/<name>.log\`.${
+- Run in the background: append \` >/tmp/<name>.log 2>&1 &\` so you don't block. Tail the log if you need to debug. Use a single log path per server (e.g. \`/tmp/<name>.log\`) and ALWAYS read from that same path — do not invent suffixed variants like \`<name>-latest.log\`; stale log files are the #1 cause of phantom "still failing" loops where you read errors from a prior run.
+- Verify it's actually listening before claiming success: \`sleep 1 && curl -sf http://localhost:<port>/ >/dev/null && echo OK || tail -c 2000 /tmp/<name>.log\`.
+- **If verification says OK, you are DONE — do not pkill and relaunch.** A single successful launch is the goal. Only kill+restart if the verify curl fails or the user asked to restart.
+- **\`pkill -f <pat>\` exits 1 when nothing matched — that is success (nothing was running), not a failure to retry.** Likewise \`fuser\`/\`lsof\` reporting no processes is the desired state. Do not loop on these.
+- **"Port X is already in use" after YOUR OWN launch means your previous launch in this same turn succeeded.** Run \`ps aux | grep <server>\` to confirm a process exists, then \`curl\` the port. If it's serving correctly, stop and hand the URL to the user — do not kill it.${
   PREVIEW_BASE
     ? `
 - Tell the user the preview URL: \`${PREVIEW_BASE}<port>/\`. AgentDock's path proxy reaches any port listening inside the container; the user opens that URL in their own browser to see the rendered UI.
@@ -695,6 +698,27 @@ Bun.serve({
         const msg = e?.message || String(err);
         if (e?.code === "ENOENT") return jsonError(404, msg);
         if (e?.code === "EACCES" || e?.code === "ENOTDIR") return jsonError(400, msg);
+        return jsonError(500, msg);
+      }
+    }
+
+    if (url.pathname === "/api/fs/write" && req.method === "POST") {
+      try {
+        const body = (await req.json()) as { path?: string; content?: string };
+        if (!body.path || typeof body.path !== "string") {
+          return jsonError(400, "path (string) is required");
+        }
+        if (typeof body.content !== "string") {
+          return jsonError(400, "content (string) is required");
+        }
+        await Bun.write(body.path, body.content);
+        const bytes = new TextEncoder().encode(body.content).byteLength;
+        return Response.json({ ok: true, bytes }, { headers: corsHeaders() });
+      } catch (err) {
+        const e = err as NodeJS.ErrnoException;
+        const msg = e?.message || String(err);
+        if (e?.code === "ENOENT") return jsonError(404, msg);
+        if (e?.code === "EACCES" || e?.code === "EISDIR") return jsonError(400, msg);
         return jsonError(500, msg);
       }
     }
