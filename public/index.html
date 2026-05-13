@@ -567,6 +567,12 @@
     color: var(--text-dim);
     border-top: 1px solid var(--line-soft);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin: 0;
+  }
+  .tool-preview.multiline {
+    white-space: pre;
+    overflow-x: auto;
+    max-height: 220px; overflow-y: auto;
   }
   .tool-preview.stderr { color: var(--err); }
   .tool[data-open="true"] .tool-preview { display: none; }
@@ -1643,38 +1649,51 @@ function renderToolCard(t) {
   return card;
 }
 
-// One-line preview shown only while the card is collapsed, so you can
-// see the gist of the result without having to click. Hidden by CSS when
-// data-open="true" since the full body renders below.
+// Preview shown only while the card is collapsed so you can see the gist
+// of the result without having to expand. Hidden by CSS when
+// data-open="true" since the full body then renders below. Capped in
+// size so a huge output doesn't blow up the thread.
+const PREVIEW_MAX_LINES = 12;
+const PREVIEW_MAX_CHARS = 600;
 function renderToolPreview(t) {
   if (t._running || !t.result) return null;
   const r = t.result;
   let text = '';
   let kind = '';
+  let multiline = false;
   if (t.name === 'shell') {
-    const out = (typeof r.stdout === 'string' && r.stdout) ? r.stdout
-              : (typeof r.stderr === 'string' && r.stderr) ? r.stderr
+    const out = (typeof r.stdout === 'string' && r.stdout.trim()) ? r.stdout
+              : (typeof r.stderr === 'string' && r.stderr.trim()) ? r.stderr
               : '';
-    text = firstLine(out);
-    kind = r.stdout ? '' : (r.stderr ? 'stderr' : '');
+    text = clipLines(out, PREVIEW_MAX_LINES, PREVIEW_MAX_CHARS);
+    kind = r.stdout && r.stdout.trim() ? '' : (r.stderr && r.stderr.trim() ? 'stderr' : '');
+    multiline = true;
   } else if (t.name === 'list_files') {
     const entries = Array.isArray(r.entries) ? r.entries : [];
-    const names = entries.slice(0, 6).map(e => e.type === 'dir' ? e.name + '/' : e.name);
-    text = names.join('  ') + (entries.length > names.length ? `  +${entries.length - names.length} more` : '');
+    text = clipLines(
+      entries.map(e => e.type === 'dir' ? e.name + '/' : e.name).join('\n'),
+      PREVIEW_MAX_LINES, PREVIEW_MAX_CHARS
+    );
+    multiline = true;
   } else if (t.name === 'read_file') {
-    text = firstLine(r.contents || '');
+    text = clipLines(r.contents || '', PREVIEW_MAX_LINES, PREVIEW_MAX_CHARS);
+    multiline = true;
   } else if (t.name === 'web_search') {
     const results = Array.isArray(r.results) ? r.results : [];
-    text = firstLine(r.answer || (results[0]?.title || ''));
+    text = clipText(r.answer || (results[0]?.title || ''), 200);
   } else if (t.name === 'web_browse') {
-    text = r.title || firstLine(r.text || '');
+    text = clipText(r.title || firstLine(r.text || ''), 200);
   } else if (t.name === 'web_extract') {
-    text = firstLine(r.text || '');
+    text = clipLines(r.text || '', PREVIEW_MAX_LINES, PREVIEW_MAX_CHARS);
+    multiline = true;
   } else {
     return null;
   }
   if (!text) return null;
-  return el('div', { class: 'tool-preview' + (kind ? ' ' + kind : '') }, clipText(text, 140));
+  const cls = 'tool-preview' + (multiline ? ' multiline' : '') + (kind ? ' ' + kind : '');
+  return multiline
+    ? el('pre', { class: cls }, text)
+    : el('div', { class: cls }, text);
 }
 
 function firstLine(s) {
@@ -1683,6 +1702,15 @@ function firstLine(s) {
 }
 function clipText(s, n) {
   return (s || '').length > n ? s.slice(0, n) + '…' : (s || '');
+}
+function clipLines(s, maxLines, maxChars) {
+  if (!s) return '';
+  const lines = s.split('\n');
+  const sliced = lines.slice(0, maxLines);
+  let out = sliced.join('\n');
+  if (out.length > maxChars) out = out.slice(0, maxChars) + '…';
+  if (lines.length > maxLines) out += `\n… +${lines.length - maxLines} more line${lines.length - maxLines === 1 ? '' : 's'}`;
+  return out;
 }
 
 function renderUserTurn(m) {
