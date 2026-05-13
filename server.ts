@@ -5,7 +5,7 @@ const PORT = Number(process.env.PORT || 8080);
 const HOSTNAME = "0.0.0.0";
 const BASE_URL = (process.env.OPENAI_API_BASE_URL || "").replace(/\/$/, "");
 const API_KEY = process.env.OPENAI_API_KEY || "";
-const DEFAULT_MODEL = process.env.MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const DEFAULT_MODEL = process.env.MODEL || "@cf/moonshotai/kimi-k2.6";
 const MAX_TOOL_ROUNDS = 12;
 const MAX_TOOL_OUTPUT = 8000;
 

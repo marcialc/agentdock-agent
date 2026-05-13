@@ -4,6 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>AgentDock</title>
+<script>
+  try {
+    const t = localStorage.getItem('agentdock-theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch {}
+</script>
 
 <!-- Fonts: Inter for UI, JetBrains Mono for code. Plex Mono is loaded for the Tweak. -->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -1018,7 +1024,7 @@
         <span class="health-dot"></span>
         <span id="health-label">ready</span>
       </span>
-      <span class="pip" id="model-pip">model: claude-sonnet-4</span>
+      <span class="pip" id="model-pip">model: @cf/moonshotai/kimi-k2.6</span>
       <span class="pip" id="sandbox-pip">sandbox: sbx_4f2a</span>
     </div>
     <div class="header-spacer"></div>
@@ -1184,7 +1190,7 @@ marked.setOptions({
 const state = {
   messages: [],         // [{role, content, time, tools?: [...]}, ...]
   inflight: null,       // running turn descriptor
-  model: 'claude-sonnet-4',
+  model: '@cf/moonshotai/kimi-k2.6',
   sandbox: 'sbx_4f2a',
   health: 'ready',
   banner: null,
@@ -1197,7 +1203,7 @@ const state = {
 // Tries real endpoints first; on failure falls back to fixtures so the
 // page is fully usable without a server.
 const MOCK = {
-  health: { ok: true, model: 'claude-sonnet-4' },
+  health: { ok: true, model: '@cf/moonshotai/kimi-k2.6' },
   responder(messages) {
     const last = (messages.filter(m => m.role==='user').at(-1)?.content || '').toLowerCase();
 
@@ -2295,7 +2301,9 @@ function bindTweaks() {
 function bindTheme() {
   $('#theme-toggle').addEventListener('click', () => {
     const cur = document.documentElement.dataset.theme;
-    document.documentElement.dataset.theme = cur === 'dark' ? 'light' : 'dark';
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('agentdock-theme', next); } catch {}
   });
 }
 
