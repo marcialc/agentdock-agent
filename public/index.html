@@ -1235,15 +1235,27 @@
     color: var(--text); background: var(--bg-2); border-color: var(--line);
   }
   .fileview-body {
-    flex: 1; overflow: auto; padding: 14px; min-height: 0;
+    flex: 1; min-height: 0;
+    padding: 14px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
   }
   .fileview-body iframe {
-    width: 100%; height: 100%; border: 0; background: var(--bg-1);
+    flex: 1; width: 100%; border: 0; background: var(--bg-1);
     border-radius: var(--radius-sm);
   }
-  .fileview-body pre {
-    margin: 0;
+  /* In the file viewer the code block IS the whole surface — let it grow
+     to fill the available height instead of capping at the tool-card-sized
+     320px max-height. */
+  .fileview-body .tc-code {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
   }
+  .fileview-body .tc-code-body {
+    flex: 1; min-height: 0;
+    max-height: none;
+  }
+  .fileview-body pre { margin: 0; }
   .fileview-empty, .fileview-error {
     padding: 20px; color: var(--text-faint); font-size: 12px;
   }
