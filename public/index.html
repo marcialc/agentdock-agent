@@ -1543,6 +1543,388 @@
     border-radius: var(--radius-sm);
   }
 
+  /* ============================================================
+     MOBILE SHELL  (data-mode="mobile" on <html>)
+     ============================================================ */
+
+  /* Hide all mobile chrome by default. Mobile media query reveals it
+     and hides the desktop chrome. */
+  .m-topbar, .m-statusstrip, .m-tabstrip, .m-composer, .m-scrim, .m-sheet { display: none; }
+
+  [data-mode="mobile"] body { overflow: hidden; }
+  [data-mode="mobile"] .app {
+    grid-template-columns: 0 1fr;
+    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-areas:
+      "topbar  topbar"
+      "status  status"
+      "tabstrip tabstrip"
+      "main    main"
+      "compose compose";
+  }
+  [data-mode="mobile"] .hd,
+  [data-mode="mobile"] .rail,
+  [data-mode="mobile"] .main .tabbar,
+  [data-mode="mobile"] .composer-wrap { display: none; }
+
+  [data-mode="mobile"] .m-topbar      { display: grid;  grid-area: topbar; }
+  [data-mode="mobile"] .m-statusstrip { display: flex;  grid-area: status; }
+  [data-mode="mobile"] .m-tabstrip    { display: flex;  grid-area: tabstrip; }
+  [data-mode="mobile"] .m-tabstrip:empty,
+  [data-mode="mobile"] .m-tabstrip.is-empty { display: none; }
+  [data-mode="mobile"] .m-composer    { display: block; grid-area: compose; }
+  [data-mode="mobile"] .m-scrim       { display: block; }
+  [data-mode="mobile"] .m-sheet       { display: flex; }
+
+  /* Re-layout .main on mobile: it just owns the thread now (no tabbar). */
+  [data-mode="mobile"] .main {
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  [data-mode="mobile"] .thread {
+    padding: 14px 12px 14px;
+    height: auto; min-height: 0;
+  }
+  [data-mode="mobile"] .thread-inner {
+    max-width: none;
+    gap: 18px;
+  }
+  [data-mode="mobile"] .bubble-user { max-width: 100%; font-size: 13px; }
+  [data-mode="mobile"] .turn-head   { font-size: 9.5px; }
+  /* Tighten tool cards on mobile + give wide content horizontal scroll. */
+  [data-mode="mobile"] .tc-head    { padding: 0 10px 0 12px; height: 34px; gap: 7px; }
+  [data-mode="mobile"] .tc-summary { max-width: 180px; font-size: 11px; }
+  [data-mode="mobile"] .tc-elapsed { font-size: 10px; }
+  [data-mode="mobile"] .tc-preview { padding: 7px 10px 9px 12px; font-size: 11px; }
+  [data-mode="mobile"] .tc-body    { padding: 10px 10px 12px 12px; gap: 10px; }
+  [data-mode="mobile"] .tc-json,
+  [data-mode="mobile"] .tc-term,
+  [data-mode="mobile"] .tc-code,
+  [data-mode="mobile"] .tc-diff    { overflow-x: auto; }
+  [data-mode="mobile"] .live       { font-size: 10px; padding: 6px 10px; }
+  [data-mode="mobile"] .live-stop  { font-size: 9.5px; height: 18px; padding: 0 6px; }
+
+  /* Top bar */
+  .m-topbar {
+    grid-template-columns: 36px 1fr 36px;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 8px;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--bg-1);
+  }
+  .m-icon-btn {
+    width: 36px; height: 36px;
+    display: inline-grid; place-items: center;
+    border: 0; background: transparent;
+    color: var(--text);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .m-icon-btn:active { background: var(--bg-2); }
+  .m-title {
+    display: flex; align-items: center; gap: 8px;
+    justify-content: center;
+    min-width: 0;
+    background: transparent; border: 0; color: var(--text);
+    cursor: pointer;
+  }
+  .m-brand-mark {
+    width: 12px; height: 12px;
+    border: 1.5px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 3px;
+    flex: none;
+  }
+  .m-title-text {
+    font: 600 13px/1 var(--mono);
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 60vw;
+  }
+  .m-title-chev { color: var(--text-faint); display: inline-flex; flex: none; }
+
+  /* Status strip */
+  .m-statusstrip {
+    align-items: center; gap: 6px;
+    padding: 6px 12px 4px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line-soft);
+    font: 500 10px/1 var(--mono);
+    color: var(--text-faint);
+  }
+  .m-statusstrip .m-status-sep { color: var(--line); }
+  .m-statusstrip .m-status-key { color: var(--text-dim); }
+  .m-statusstrip .pip { height: 18px; padding: 0 6px; font-size: 10px; border: 0; background: transparent; }
+  .m-statusstrip .pip .pip-dot { width: 5px; height: 5px; }
+
+  /* File tab strip (horizontal scroll, pill tabs) */
+  .m-tabstrip {
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line-soft);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .m-tabstrip::-webkit-scrollbar { display: none; }
+  .m-tab {
+    display: inline-flex; align-items: center; gap: 6px;
+    flex: none;
+    height: 24px; padding: 0 8px;
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text-dim);
+    font: 500 11px/1 var(--mono);
+    cursor: pointer;
+    max-width: 180px;
+  }
+  .m-tab.is-active { color: var(--text); border-color: var(--line); background: var(--bg-2); }
+  .m-tab-icon { display: inline-flex; color: var(--text-faint); }
+  .m-tab.is-active .m-tab-icon { color: var(--accent); }
+  .m-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m-tab-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--warn); flex: none; }
+  .m-tab-close {
+    display: inline-grid; place-items: center;
+    width: 18px; height: 18px;
+    color: var(--text-faint); border-radius: 3px;
+    border: 0; background: transparent; padding: 0; cursor: pointer;
+  }
+  .m-tab-close:active { background: var(--bg-2); color: var(--text); }
+
+  /* Composer (sticky bottom, in normal flow so iOS keyboard doesn't fight it) */
+  .m-composer {
+    padding: 8px 10px 12px;
+    background: var(--bg-1);
+    border-top: 1px solid var(--line-soft);
+    z-index: 4;
+  }
+  .m-composer-inner {
+    display: flex; align-items: flex-end; gap: 6px;
+    background: var(--bg-1);
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    padding: 8px 8px 6px 12px;
+  }
+  .m-composer-inner:focus-within {
+    border-color: color-mix(in oklch, var(--accent) 45%, var(--line));
+    background: var(--bg);
+  }
+  .m-composer-input {
+    flex: 1;
+    border: 0; background: transparent; outline: none;
+    color: var(--text);
+    font: 500 13px/1.4 var(--mono);
+    letter-spacing: -0.005em;
+    resize: none;
+    max-height: 140px;
+    min-height: 18px;
+  }
+  .m-composer-input::placeholder { color: var(--text-faint); }
+  .m-send {
+    height: 30px; min-width: 30px; padding: 0 10px;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--line));
+    border-radius: 8px;
+    color: var(--text);
+    display: inline-flex; align-items: center; justify-content: center;
+    font: 500 11px/1 var(--mono);
+    cursor: pointer;
+  }
+  .m-send[disabled] {
+    background: var(--bg);
+    border-color: var(--line-soft);
+    color: var(--text-faint);
+  }
+  .m-composer-foot {
+    display: flex; align-items: center;
+    padding: 6px 4px 0;
+    font: 500 9.5px/1 var(--mono);
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+  }
+  .m-composer-foot .cf-shell { color: var(--accent); }
+
+  /* Scrim + bottom sheet */
+  .m-scrim {
+    position: fixed; inset: 0;
+    background: oklch(0 0 0 / 0);
+    z-index: 38;
+    pointer-events: none;
+    transition: background 180ms ease-out;
+  }
+  .m-scrim.is-open {
+    background: oklch(0 0 0 / 0.40);
+    pointer-events: auto;
+  }
+  .m-sheet {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: 76vh;
+    background: var(--bg-1);
+    border-top: 1px solid var(--line);
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
+    box-shadow: 0 -10px 32px -8px oklch(0 0 0 / 0.40);
+    z-index: 39;
+    transform: translateY(100%);
+    transition: transform 220ms cubic-bezier(.4,.0,.2,1);
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .m-sheet.is-open { transform: translateY(0); }
+
+  .m-sheet-handle {
+    align-self: center;
+    width: 36px; height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+    margin: 8px 0 6px;
+  }
+
+  .m-sheet-tabs {
+    display: flex; gap: 4px;
+    padding: 4px 12px 8px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .m-sheet-tab {
+    flex: 1;
+    height: 30px;
+    border: 0; background: transparent;
+    color: var(--text-dim);
+    font: 500 12px/1 var(--mono);
+    cursor: pointer;
+    border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    transition: color 100ms, background 100ms;
+  }
+  .m-sheet-tab:active { background: var(--bg-2); }
+  .m-sheet-tab.is-active { color: var(--text); background: var(--bg-2); }
+  .m-sheet-tab-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 16px; min-width: 16px; padding: 0 4px;
+    border-radius: 8px;
+    background: var(--bg);
+    border: 1px solid var(--line-soft);
+    font-size: 9.5px;
+    color: var(--text-faint);
+  }
+  .m-sheet-body {
+    flex: 1; overflow: auto;
+    padding: 8px 8px 44px;
+  }
+  .m-sheet-panel { display: none; }
+  .m-sheet-panel.is-active { display: block; }
+  .m-sheet-section {
+    padding: 10px 8px 6px;
+    color: var(--text-faint);
+    font: 500 9.5px/1 var(--mono);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+  }
+
+  .m-chat-row {
+    display: grid;
+    grid-template-columns: 14px 1fr 28px;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 8px 10px 10px;
+    border-radius: 8px;
+    position: relative;
+    cursor: pointer;
+    border: 0; background: transparent; text-align: left;
+    width: 100%;
+    color: var(--text);
+  }
+  .m-chat-row:active { background: var(--bg-2); }
+  .m-chat-row.is-active { background: var(--bg-2); }
+  .m-chat-row .m-chat-rail {
+    position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px;
+    border-radius: 2px; background: transparent;
+  }
+  .m-chat-row.is-active .m-chat-rail { background: var(--accent); }
+  .m-chat-icon { color: var(--text-faint); display: inline-flex; }
+  .m-chat-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .m-chat-title {
+    font: 600 12.5px/1.3 var(--mono);
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .m-chat-meta {
+    font: 500 10px/1 var(--mono);
+    color: var(--text-faint);
+  }
+  .m-chat-del {
+    width: 28px; height: 28px;
+    border: 0; background: transparent; padding: 0;
+    border-radius: 6px;
+    color: var(--text-faint);
+    display: inline-grid; place-items: center;
+    cursor: pointer;
+  }
+  .m-chat-del:active { background: var(--error-soft); color: var(--error); }
+
+  .m-sheet-action {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin: 10px 4px 0;
+    height: 36px; padding: 0 12px;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font: 500 12px/1 var(--mono);
+    cursor: pointer;
+  }
+
+  .m-file-row {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    align-items: center; gap: 8px;
+    padding: 8px 8px;
+    font: 500 12px/1.2 var(--mono);
+    color: var(--text);
+    border-radius: 6px;
+    border: 0; background: transparent; text-align: left;
+    width: 100%;
+    cursor: pointer;
+  }
+  .m-file-row:active { background: var(--bg-2); }
+  .m-file-icon { color: var(--text-dim); display: inline-flex; }
+  .m-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .m-file-badges { display: inline-flex; gap: 3px; }
+
+  .m-setting-row {
+    display: flex; align-items: center;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--line-soft);
+    font: 500 12.5px/1 var(--mono);
+    color: var(--text);
+  }
+  .m-setting-row > span:first-child { flex: 1; }
+  .m-segmented {
+    display: inline-flex;
+    border: 1px solid var(--line-soft);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .m-seg {
+    border: 0; background: transparent;
+    height: 26px; padding: 0 12px;
+    color: var(--text-dim);
+    font: 500 11px/1 var(--mono);
+    cursor: pointer;
+  }
+  .m-seg.is-active { background: var(--bg-2); color: var(--text); }
+  .m-seg + .m-seg { border-left: 1px solid var(--line-soft); }
+
+  /* Auto-switch into mobile mode at narrow viewports. JS also drives this
+     so devices that lie about width still get the right layout. */
+  @media (max-width: 720px) {
+    html:not([data-mode]) body { /* fallback while JS hasn't run yet */ }
+  }
+
 </style>
 </head>
 <body>
@@ -1668,6 +2050,98 @@
     </div>
   </main>
 
+  <!-- ─── MOBILE CHROME (hidden on desktop via [data-mode]) ─── -->
+  <div class="m-topbar">
+    <button class="m-icon-btn" id="m-menu-btn" type="button" aria-label="menu">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 6h14M3 10h14M3 14h14"/></svg>
+    </button>
+    <button class="m-title" id="m-title-btn" type="button" aria-label="open chats">
+      <span class="m-brand-mark"></span>
+      <span class="m-title-text" id="m-title-text">agent dock</span>
+      <span class="m-title-chev"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 4l3 3 3-3"/></svg></span>
+    </button>
+    <button class="m-icon-btn" id="m-new-btn" type="button" aria-label="new chat">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 4v10M4 9h10"/></svg>
+    </button>
+  </div>
+
+  <div class="m-statusstrip">
+    <span class="pip bare ok" id="m-health">
+      <span class="pip-dot"></span>
+      <span id="m-health-label">ready</span>
+    </span>
+    <span class="m-status-sep">·</span>
+    <span class="m-status-key" id="m-model">model</span>
+    <span class="m-status-sep">·</span>
+    <span class="m-status-key" id="m-sandbox">sbx</span>
+  </div>
+
+  <div class="m-tabstrip is-empty" id="m-tabstrip"></div>
+
+  <div class="m-composer">
+    <div class="m-composer-inner">
+      <textarea id="m-input" class="m-composer-input" rows="1" placeholder="message agent · ! for shell"></textarea>
+      <button class="m-send" id="m-send" disabled>
+        <span id="m-send-icon"></span>
+      </button>
+    </div>
+    <div class="m-composer-foot">
+      <span id="m-ctx" style="color: var(--text-faint)">ctx · 0 / 200,000</span>
+      <span style="margin-left:auto" id="m-cf-right"></span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Mobile bottom sheet (scrim + sheet live outside .app so they cover the iframe/overlays) -->
+<div class="m-scrim" id="m-scrim"></div>
+<div class="m-sheet" id="m-sheet" role="dialog" aria-label="menu">
+  <div class="m-sheet-handle"></div>
+  <div class="m-sheet-tabs">
+    <button class="m-sheet-tab is-active" data-tab="chats"    type="button">chats <span class="m-sheet-tab-count" id="m-sheet-chats-count">0</span></button>
+    <button class="m-sheet-tab"           data-tab="files"    type="button">files</button>
+    <button class="m-sheet-tab"           data-tab="settings" type="button">tweaks</button>
+  </div>
+  <div class="m-sheet-body">
+    <div class="m-sheet-panel is-active" id="m-sheet-chats">
+      <div class="m-sheet-section">recent</div>
+      <div id="m-sheet-chats-list"></div>
+      <button class="m-sheet-action" id="m-sheet-new" type="button">
+        <span id="m-sheet-new-icon"></span> new chat
+      </button>
+    </div>
+    <div class="m-sheet-panel" id="m-sheet-files">
+      <div class="m-sheet-section">/workspace</div>
+      <div id="m-sheet-files-list"></div>
+    </div>
+    <div class="m-sheet-panel" id="m-sheet-settings">
+      <div class="m-sheet-section">appearance</div>
+      <div class="m-setting-row">
+        <span>theme</span>
+        <div class="m-segmented" id="m-theme-seg">
+          <button class="m-seg" data-val="dark" type="button">dark</button>
+          <button class="m-seg" data-val="light" type="button">light</button>
+        </div>
+      </div>
+      <div class="m-setting-row">
+        <span>mono font</span>
+        <span style="color: var(--text-dim)">JetBrains Mono</span>
+      </div>
+      <div class="m-sheet-section" style="margin-top: 14px">session</div>
+      <div class="m-setting-row">
+        <span>model</span>
+        <span id="m-set-model" style="color: var(--text-dim)">—</span>
+      </div>
+      <div class="m-setting-row">
+        <span>sandbox</span>
+        <span id="m-set-sandbox" style="color: var(--text-dim)">—</span>
+      </div>
+      <div class="m-setting-row">
+        <span>workspace</span>
+        <span style="color: var(--accent)">on</span>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Tweaks -->
@@ -3862,6 +4336,306 @@ function bindChatsMenu() {
   });
 }
 
+// ---------- mobile shell ----------
+// Same state, same send pipeline as desktop — we just paint a different
+// chrome (top bar, status strip, horizontal tabstrip, sticky composer,
+// bottom sheet with chats/files/tweaks). The mobile mode is selected by
+// a matchMedia listener that toggles <html data-mode="mobile|desktop">.
+
+const MQ_MOBILE = window.matchMedia('(max-width: 720px)');
+
+function applyViewport() {
+  document.documentElement.dataset.mode = MQ_MOBILE.matches ? 'mobile' : 'desktop';
+}
+
+function paintMobileIcons() {
+  const sendIcon = document.getElementById('m-send-icon');
+  if (sendIcon) sendIcon.innerHTML = ICON.send;
+  const newIcon = document.getElementById('m-sheet-new-icon');
+  if (newIcon) newIcon.innerHTML = ICON.plus;
+}
+
+function renderMobileHeader() {
+  const titleEl = $('#m-title-text');
+  if (titleEl) titleEl.textContent = state.chatTitle || 'agent dock';
+  const hp = $('#m-health');
+  if (hp) {
+    hp.classList.remove('ok', 'err');
+    hp.classList.add(state.health === 'error' ? 'err' : 'ok');
+  }
+  const hl = $('#m-health-label');
+  if (hl) hl.textContent = state.health;
+  const m = $('#m-model'); if (m) m.textContent = state.model;
+  const sb = $('#m-sandbox'); if (sb) sb.textContent = state.sandbox;
+  const setM = $('#m-set-model'); if (setM) setM.textContent = state.model;
+  const setS = $('#m-set-sandbox'); if (setS) setS.textContent = state.sandbox;
+}
+
+function renderMobileTabstrip() {
+  const host = $('#m-tabstrip');
+  if (!host) return;
+  host.innerHTML = '';
+  const mainTab = $('#main').dataset.tab;
+  const items = [];
+  for (const t of fileTabs) {
+    items.push({
+      kind: 'file',
+      icon: ICON.file,
+      label: t.path.split('/').pop() || t.path,
+      title: t.path,
+      active: mainTab === 'file' && t.path === activeFilePath,
+      dirty: !!t.dirty,
+      onActivate: () => { activeFilePath = t.path; setActiveTab('file'); renderFileView(); renderMobileTabstrip(); },
+      onClose: () => { closeFileTab(t.path); renderMobileTabstrip(); },
+    });
+  }
+  if (previewState.url) {
+    items.push({
+      kind: 'preview',
+      icon: ICON.globe,
+      label: urlLabel(previewState.url),
+      title: previewState.url,
+      active: mainTab === 'preview',
+      onActivate: () => { setActiveTab('preview'); renderMobileTabstrip(); },
+      onClose: () => { closePreviewTab(); renderMobileTabstrip(); },
+    });
+  }
+  host.classList.toggle('is-empty', items.length === 0);
+  for (const it of items) {
+    const b = el('button', {
+      class: 'm-tab' + (it.active ? ' is-active' : ''),
+      type: 'button',
+      title: it.title || it.label,
+      onclick: (e) => { if (e.target.closest('.m-tab-close')) return; it.onActivate(); },
+    });
+    b.append(el('span', { class: 'm-tab-icon', html: it.icon }));
+    if (it.dirty) b.append(el('span', { class: 'm-tab-dot' }));
+    b.append(el('span', { class: 'm-tab-label' }, it.label));
+    b.append(el('button', {
+      class: 'm-tab-close',
+      type: 'button',
+      title: 'close',
+      html: ICON.xSmall,
+      onclick: (e) => { e.stopPropagation(); it.onClose(); },
+    }));
+    host.append(b);
+  }
+}
+
+function renderMobileChatsPanel() {
+  const list = $('#m-sheet-chats-list');
+  const count = $('#m-sheet-chats-count');
+  if (!list) return;
+  if (count) count.textContent = String(state.chatList.length);
+  list.innerHTML = '';
+  if (!state.chatList.length) {
+    list.append(el('div', { style: 'padding: 16px 8px; color: var(--text-faint); font-size: 11px; text-align: center' }, 'no chats yet'));
+    return;
+  }
+  for (const c of state.chatList) {
+    const row = el('button', {
+      class: 'm-chat-row' + (c.id === state.chatId ? ' is-active' : ''),
+      type: 'button',
+      onclick: async () => {
+        closeSheet();
+        ensureChatOpen({ id: c.id, title: c.title });
+        if (c.id !== state.chatId) await loadChat(c.id);
+        else { setActiveTab('chat'); renderTabbar(); renderMobileTabstrip(); }
+      },
+    });
+    row.append(el('span', { class: 'm-chat-rail' }));
+    row.append(el('span', { class: 'm-chat-icon', html: ICON.terminal }));
+    const body = el('div', { class: 'm-chat-body' });
+    body.append(el('div', { class: 'm-chat-title' }, c.title || '(untitled)'));
+    body.append(el('div', { class: 'm-chat-meta' }, chatTimestamp(c) || ''));
+    row.append(body);
+    row.append(el('button', {
+      class: 'm-chat-del',
+      type: 'button',
+      'aria-label': 'delete chat',
+      html: ICON.xSmall,
+      onclick: async (e) => { e.stopPropagation(); await deleteChat(c.id); },
+    }));
+    list.append(row);
+  }
+}
+
+// Mobile workspace tree: flatten the existing fsCache + open set into rows.
+function renderMobileFilesPanel() {
+  const list = $('#m-sheet-files-list');
+  if (!list) return;
+  list.innerHTML = '';
+  const rows = [];
+  function walk(path, depth) {
+    const name = path.split('/').pop() || path;
+    const opened = open.has(path);
+    const t = touched[path];
+    rows.push({ path, name: path === ROOT ? (name || 'workspace') : name, depth, isDir: true, opened, rw: t });
+    if (!opened) return;
+    const entry = fsCache.get(path);
+    if (!entry || entry.error) return;
+    const sorted = [...entry.entries].sort((a, b) => {
+      if (!!a.isDir !== !!b.isDir) return a.isDir ? -1 : 1;
+      return String(a.name).localeCompare(String(b.name));
+    });
+    for (const child of sorted) {
+      const childPath = path === '/' ? `/${child.name}` : `${path}/${child.name}`;
+      if (child.isDir) walk(childPath, depth + 1);
+      else rows.push({ path: childPath, name: child.name, depth: depth + 1, isDir: false, rw: touched[childPath] });
+    }
+  }
+  walk(ROOT, 0);
+  for (const row of rows) {
+    const btn = el('button', {
+      class: 'm-file-row',
+      type: 'button',
+      style: `padding-left: ${12 + row.depth * 14}px`,
+      title: row.path,
+      onclick: () => {
+        if (row.isDir) {
+          if (open.has(row.path)) open.delete(row.path);
+          else { open.add(row.path); if (!fsCache.has(row.path)) fetchDir(row.path); }
+          renderMobileFilesPanel();
+          renderRail();
+        } else {
+          closeSheet();
+          openFile(row.path);
+        }
+      },
+    });
+    btn.append(el('span', { class: 'm-file-icon', html: row.isDir ? (row.opened ? ICON.folderOpen : ICON.folder) : ICON.file }));
+    btn.append(el('span', { class: 'm-file-name' }, row.name + (row.isDir ? '/' : '')));
+    const badges = el('span', { class: 'm-file-badges' });
+    if (row.rw && row.rw.includes('r')) badges.append(el('span', { class: 'rb rb--r' }, 'r'));
+    if (row.rw && row.rw.includes('w')) badges.append(el('span', { class: 'rb rb--w' }, 'w'));
+    btn.append(badges);
+    list.append(btn);
+  }
+}
+
+function syncMobileThemeSeg() {
+  const cur = document.documentElement.dataset.theme || 'dark';
+  for (const b of $$('#m-theme-seg .m-seg')) {
+    b.classList.toggle('is-active', b.dataset.val === cur);
+  }
+}
+
+function openSheet(tab) {
+  $('#m-scrim').classList.add('is-open');
+  $('#m-sheet').classList.add('is-open');
+  if (tab) selectSheetTab(tab);
+  renderMobileChatsPanel();
+  renderMobileFilesPanel();
+  syncMobileThemeSeg();
+}
+function closeSheet() {
+  $('#m-scrim').classList.remove('is-open');
+  $('#m-sheet').classList.remove('is-open');
+}
+function selectSheetTab(name) {
+  for (const t of $$('.m-sheet-tab')) {
+    t.classList.toggle('is-active', t.dataset.tab === name);
+  }
+  for (const p of $$('.m-sheet-panel')) {
+    p.classList.toggle('is-active', p.id === 'm-sheet-' + name);
+  }
+}
+
+function autosizeMobile() {
+  const ta = $('#m-input');
+  if (!ta) return;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(140, ta.scrollHeight) + 'px';
+  updateMobileComposerState();
+}
+function updateMobileComposerState() {
+  const ta = $('#m-input');
+  const send = $('#m-send');
+  const right = $('#m-cf-right');
+  if (!ta || !send) return;
+  const v = ta.value;
+  const isShell = v.trimStart().startsWith('!');
+  send.disabled = !v.trim() || !!state.inflight;
+  send.innerHTML = isShell ? 'run' : ICON.send;
+  if (right) {
+    right.innerHTML = '';
+    if (isShell) right.append(el('span', { class: 'cf-shell' }, 'shell escape'));
+    else right.append(el('span', {}, state.model));
+  }
+}
+function renderMobileMeter() {
+  const ctx = $('#m-ctx');
+  if (!ctx) return;
+  ctx.textContent = `ctx · ${state.tokens.toLocaleString()} / ${state.tokenBudget.toLocaleString()}`;
+}
+
+function bindMobile() {
+  paintMobileIcons();
+  applyViewport();
+  MQ_MOBILE.addEventListener?.('change', applyViewport);
+
+  // Top bar
+  $('#m-menu-btn').addEventListener('click', () => openSheet('chats'));
+  $('#m-title-btn').addEventListener('click', () => openSheet('chats'));
+  $('#m-new-btn').addEventListener('click', () => { closeSheet(); newChat(); });
+
+  // Sheet
+  $('#m-scrim').addEventListener('click', closeSheet);
+  for (const t of $$('.m-sheet-tab')) {
+    t.addEventListener('click', () => selectSheetTab(t.dataset.tab));
+  }
+  $('#m-sheet-new').addEventListener('click', () => { closeSheet(); newChat(); });
+  for (const b of $$('#m-theme-seg .m-seg')) {
+    b.addEventListener('click', () => {
+      const next = b.dataset.val;
+      const cur = document.documentElement.dataset.theme;
+      if (cur === next) return;
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem('agentdock-theme', next); } catch {}
+      syncMobileThemeSeg();
+    });
+  }
+
+  // Composer
+  const ta = $('#m-input');
+  ta.addEventListener('input', autosizeMobile);
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      sendFromMobile();
+    }
+  });
+  $('#m-send').addEventListener('click', sendFromMobile);
+  updateMobileComposerState();
+}
+
+function sendFromMobile() {
+  const mta = $('#m-input');
+  const v = mta.value;
+  if (!v.trim() || state.inflight) return;
+  // Drive the same send() path as desktop — copy text into the shared
+  // input textarea so all the existing wiring (autosize, mock fallback,
+  // shell escape, persistence) works unchanged.
+  const dta = $('#input');
+  dta.value = v;
+  mta.value = '';
+  autosizeMobile();
+  send();
+}
+window.sendFromMobile = sendFromMobile;
+
+// Hook into existing renderers: whenever desktop renders, refresh mobile too.
+const _renderHeader = renderHeader;
+renderHeader = function() { _renderHeader(); renderMobileHeader(); };
+const _renderTabbar = renderTabbar;
+renderTabbar = function() { _renderTabbar(); renderMobileTabstrip(); };
+const _renderChatsMenu = renderChatsMenu;
+renderChatsMenu = function() { _renderChatsMenu(); renderMobileChatsPanel(); renderMobileHeader(); };
+const _renderRail = renderRail;
+renderRail = function() { _renderRail(); renderMobileFilesPanel(); };
+const _renderMeter = renderMeter;
+renderMeter = function() { _renderMeter(); renderMobileMeter(); };
+
 // ---------- init ----------
 async function init() {
   paintStaticIcons();
@@ -3872,6 +4646,7 @@ async function init() {
   bindTabbar();
   bindChatsMenu();
   bindScroll();
+  bindMobile();
   // Health
   const h = await fetchHealth();
   state.model = h.model || state.model;
